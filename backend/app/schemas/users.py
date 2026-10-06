@@ -2,7 +2,14 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal, Self
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    StrictBool,
+    StringConstraints,
+    model_validator,
+)
 
 from app.schemas.types import reject_nul
 
@@ -45,7 +52,7 @@ class InvitedUserOut(UserOut):
 
 class UserUpdate(BaseModel):
     role: Role | None = None
-    is_active: bool | None = None
+    is_active: StrictBool | None = None
 
     @model_validator(mode="after")
     def _at_least_one_real_value(self) -> Self:

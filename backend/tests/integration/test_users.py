@@ -1,6 +1,9 @@
-from sqlalchemy import text
+import logging
+from contextlib import contextmanager
 
-from app.db import set_tenant
+from sqlalchemy import event, text
+
+from app.db import engine, set_tenant
 
 INVITE = {"email": "new.person@orga.test", "full_name": "New Person", "role": "member"}
 
@@ -154,3 +157,88 @@ def test_deactivate_then_reactivate_writes_audit_rows_in_order(client, db, seede
         .all()
     )
     assert actions == ["user.deactivated", "user.reactivated"]
+
+
+@contextmanager
+def _before_first_admin_lock(conn, statements):
+    """Run raw SQL on the test connection just before the first FOR UPDATE statement."""
+    state = {"done": False}
+
+    def hook(connection, cursor, statement, parameters, context, executemany):
+        if state["done"] or "FOR UPDATE" not in statement:
+            return
+        state["done"] = True
+        for sql, params in statements:
+            connection.execute(text(sql), params)
+
+    event.listen(engine, "before_cursor_execute", hook)
+    try:
+        yield
+    finally:
+        event.remove(engine, "before_cursor_execute", hook)
+
+
+def _set_role(user, role):
+    return ("UPDATE users SET role = :role WHERE id = :id", {"role": role, "id": user.id})
+
+
+def _active_admin_count(db, org):
+    set_tenant(db, org.id)
+    return db.execute(
+        text("SELECT count(*) FROM users WHERE role = 'admin' AND is_active")
+    ).scalar_one()
+
+
+def test_stale_target_cannot_leave_org_without_an_active_admin(client, conn, db, seeded, auth):
+    # T2 (admin A deactivates X) has read X as a member. Before it locks the admins,
+    # T1 promotes X and T3 (X) demotes A, so X is now the only admin.
+    a, x = seeded.a.admin, seeded.a.member
+    headers = auth(a)
+    with _before_first_admin_lock(conn, [_set_role(x, "admin"), _set_role(a, "member")]):
+        r = _patch(client, headers, x, {"is_active": False})
+    assert _active_admin_count(db, seeded.a.org) >= 1, "organization left with no active admin"
+    assert r.status_code in (403, 409), r.json()
+
+
+def test_actor_demoted_while_waiting_is_forbidden(client, conn, db, seeded, auth):
+    a, x = seeded.a.admin, seeded.a.member
+    headers = auth(a)
+    with _before_first_admin_lock(conn, [_set_role(x, "admin"), _set_role(a, "member")]):
+        r = _patch(client, headers, x, {"role": "member"})
+    assert r.status_code == 403
+    assert r.json()["error"] == {"code": "forbidden", "message": "Admin role required"}
+
+
+def test_database_errors_do_not_log_parameters(client, conn, seeded, auth, caplog):
+    def break_insert(connection, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().startswith("INSERT INTO users"):
+            statement = statement.replace("INSERT INTO users", "INSERT INTO users_missing", 1)
+        return statement, parameters
+
+    event.listen(engine, "before_cursor_execute", break_insert, retval=True)
+    try:
+        with caplog.at_level(logging.ERROR, logger="app.errors"):
+            r = client.post("/api/users", json=INVITE, headers=auth(seeded.a.admin))
+    finally:
+        event.remove(engine, "before_cursor_execute", break_insert)
+    assert r.status_code == 500
+    records = [rec for rec in caplog.records if rec.name == "app.errors"]
+    assert records
+    logged = caplog.text
+    assert "users_missing" in logged  # the failure itself was logged
+    assert "$argon2" not in logged
+    assert INVITE["email"] not in logged
+
+
+def test_invite_response_is_not_cacheable(client, seeded, auth):
+    r = client.post("/api/users", json=INVITE, headers=auth(seeded.a.admin))
+    assert r.status_code == 201
+    assert r.headers["cache-control"] == "no-store"
+
+
+def test_is_active_must_be_a_real_boolean(client, seeded, auth):
+    headers = auth(seeded.a.admin)
+    for value in ["yes", 1, "on", "true"]:
+        r = _patch(client, headers, seeded.a.member, {"is_active": value})
+        assert r.status_code == 422, value
+        assert r.json()["error"]["message"].startswith("body.is_active:")

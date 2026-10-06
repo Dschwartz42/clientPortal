@@ -1,7 +1,7 @@
 import secrets
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -33,7 +33,7 @@ def list_users(admin: AdminUser, db: Db, page: PageDep):
 
 
 @router.post("", response_model=InvitedUserOut, status_code=201)
-def invite_user(body: UserInvite, admin: AdminUser, db: Db):
+def invite_user(body: UserInvite, admin: AdminUser, db: Db, response: Response):
     temporary_password = secrets.token_urlsafe(12)
     user = User(
         id=uuid.uuid4(),
@@ -67,26 +67,35 @@ def invite_user(body: UserInvite, admin: AdminUser, db: Db):
         **UserOut.model_validate(user).model_dump(), temporary_password=temporary_password
     )
     db.commit()
+    response.headers["Cache-Control"] = "no-store"  # carries a temporary credential
     return out
 
 
 @router.patch("/{user_id}", response_model=UserOut)
 def update_user(user_id: uuid.UUID, body: UserUpdate, admin: AdminUser, db: Db):
-    target = db.scalar(select(User).where(User.id == user_id, User.org_id == admin.org_id))
-    if target is None:
-        raise ApiError(404, "not_found", "User not found")
-
-    changes = body.model_dump(exclude_unset=True)
-    new_role = changes.get("role", target.role)
-    new_is_active = changes.get("is_active", target.is_active)
-
-    # Lock the org's active admins so two concurrent demotions cannot both pass the check.
+    # Lock the org's active admins first so two concurrent changes cannot both pass the
+    # check. Everything is read after the lock: a row read earlier may be stale.
     admin_ids = db.scalars(
         select(User.id)
         .where(User.org_id == admin.org_id, User.role == "admin", User.is_active.is_(True))
         .order_by(User.id)
         .with_for_update()
     ).all()
+    if admin.id not in admin_ids:
+        # Demoted or deactivated while this request waited for the lock.
+        raise ApiError(403, "forbidden", "Admin role required")
+    # populate_existing refreshes rows already in the session's identity map.
+    target = db.scalar(
+        select(User)
+        .where(User.id == user_id, User.org_id == admin.org_id)
+        .execution_options(populate_existing=True)
+    )
+    if target is None:
+        raise ApiError(404, "not_found", "User not found")
+
+    changes = body.model_dump(exclude_unset=True)
+    new_role = changes.get("role", target.role)
+    new_is_active = changes.get("is_active", target.is_active)
     violation = check_user_update(
         actor_id=admin.id,
         target_id=target.id,
