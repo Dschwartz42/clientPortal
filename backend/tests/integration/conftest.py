@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from alembic import command
-from app.db import engine, get_db, set_tenant
+from app.db import SessionLocal, engine, get_db, set_tenant
 from app.main import app
 from app.models import Account, Organization, Transaction, User
 from app.security import create_access_token, hash_password
@@ -57,7 +57,7 @@ def conn():
 
 @pytest.fixture()
 def db(conn):
-    session = Session(bind=conn, join_transaction_mode="create_savepoint", expire_on_commit=False)
+    session = SessionLocal(bind=conn, join_transaction_mode="create_savepoint")
     yield session
     session.close()
 
@@ -155,9 +155,7 @@ def seeded(db) -> Seeded:
 @pytest.fixture()
 def client(conn):
     def override_get_db():
-        session = Session(
-            bind=conn, join_transaction_mode="create_savepoint", expire_on_commit=False
-        )
+        session = SessionLocal(bind=conn, join_transaction_mode="create_savepoint")
         # Every request starts with no tenant, as it would on a fresh pooled connection.
         session.execute(CLEAR_TENANT)
         try:
