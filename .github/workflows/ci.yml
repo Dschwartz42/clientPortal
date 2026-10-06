@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      # alembic upgrade head and pytest both target the test database in CI.
+      DATABASE_URL: postgresql+psycopg://portal_app:app_pw@localhost:5432/portal_test
+      MIGRATION_DATABASE_URL: postgresql+psycopg://portal_owner:owner_pw@localhost:5432/portal_test
+      JWT_SECRET: ci-secret-0123456789-0123456789-0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/constraints.txt
+      - name: Install dependencies
+        run: pip install -e ".[dev]" -c constraints.txt
+      - name: Create database roles and test database
+        run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f scripts/ci_db_setup.sql
+        env:
+          PGPASSWORD: postgres
+      - name: Lint
+        run: ruff check .
+      - name: Format check
+        run: ruff format --check .
+      - name: Migrate
+        run: alembic upgrade head
+      - name: Test
+        run: pytest -v --cov=app --cov-fail-under=80
