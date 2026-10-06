@@ -1262,3 +1262,23 @@ git switch main && git pull
 ```
 
 **Plan 3 done when:** both PRs are merged green and the four demo admins return visibly different analytics locally.
+
+---
+
+## Carried over from the Plan 1 review
+
+Plan 1's code changed in review. Plan 3 tasks must follow what is on `main`, not Plan 1's original text:
+
+- **Tenant context survives a commit.** `set_tenant` records the org in `session.info`, and an `after_begin` listener on `SessionLocal` re-applies it per transaction. Tests must build sessions with `SessionLocal(bind=conn, join_transaction_mode="create_savepoint")`. Never reuse a tenant-scoped session for another tenant.
+- **Free-text inputs use `NoNulStr`** from `app/schemas/types.py` (rejects NUL with a 422). Use it for the invite `email`/`full_name` and the audit `action` filter.
+- **Dates use UTC:** `datetime.now(UTC).date()`, not `date.today()`, in code and tests.
+- **`page` is bounded** (`le=1_000_000`) in `PageDep`; unexpected errors return a 500 `internal_error` envelope and `DataError` maps to 422.
+- **Every new table** gets ENABLE + FORCE row level security, a policy and explicit grants in its own migration.
+- **Models do not declare the composite foreign keys**, so the seed must `flush()` parents before children (the script in Task 4 already does).
+
+Open minors, fix when the file is next touched:
+- The catch-all 500 runs outside `CORSMiddleware`, so a browser sees a CORS failure instead of the envelope. Fix before Plan 4 relies on it: handle unexpected exceptions in an HTTP middleware added inside CORS.
+- `seeded` fixture should also `db.info.pop("org_id", None)` beside its tenant clear.
+- Missing tests: member `DELETE /api/accounts/{id}` → 403; delete writes an audit entry; transactions `from`/`to` exactly on a row's date.
+- The `DataError` → 422 handler logs nothing.
+- 401 responses carry no `WWW-Authenticate: Bearer` header.
