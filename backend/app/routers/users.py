@@ -84,6 +84,7 @@ def update_user(user_id: uuid.UUID, body: UserUpdate, admin: AdminUser, db: Db):
     admin_ids = db.scalars(
         select(User.id)
         .where(User.org_id == admin.org_id, User.role == "admin", User.is_active.is_(True))
+        .order_by(User.id)
         .with_for_update()
     ).all()
     violation = check_user_update(

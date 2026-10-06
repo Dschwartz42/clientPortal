@@ -66,6 +66,27 @@ def test_unexpected_exception_returns_generic_500_envelope(client, seeded, auth,
     assert "secret-internal-detail" not in r.text
 
 
+def test_unexpected_exception_500_carries_cors_headers(client, seeded, auth, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("secret-internal-detail")
+
+    monkeypatch.setattr("app.routers.accounts.net_revenue_between", boom)
+    headers = {**auth(seeded.a.member), "Origin": "http://localhost:5173"}
+    with TestClient(app, raise_server_exceptions=False) as quiet:
+        r = quiet.get(f"/api/accounts/{seeded.a.accounts[0].id}", headers=headers)
+    _assert_envelope(r, 500, "internal_error")
+    assert "secret-internal-detail" not in r.text
+    assert r.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_timeseries_to_date_min_without_from_is_422(client, seeded, auth):
+    r = client.get(
+        "/api/analytics/timeseries?metric=net_revenue&to=0001-01-01",
+        headers=auth(seeded.a.member),
+    )
+    _assert_envelope(r, 422, "validation_error")
+
+
 def test_data_error_maps_to_422(client, seeded, auth, monkeypatch):
     def boom(*args, **kwargs):
         raise DataError("stmt", {}, Exception("bad data"))

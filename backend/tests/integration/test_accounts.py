@@ -220,3 +220,27 @@ def test_patch_audit_values_are_normalized(client, db, seeded, auth):
         "before": {"monthly_value": "1000.00"},
         "after": {"monthly_value": "1200.00"},
     }
+
+
+def test_member_cannot_delete(client, seeded, auth):
+    r = client.delete(f"/api/accounts/{seeded.a.accounts[1].id}", headers=auth(seeded.a.member))
+    assert r.status_code == 403
+
+
+def test_delete_account_without_transactions_writes_audit_entry(client, db, seeded, auth):
+    beta = seeded.a.accounts[1]
+    assert (
+        client.delete(f"/api/accounts/{beta.id}", headers=auth(seeded.a.admin)).status_code == 204
+    )
+    set_tenant(db, seeded.a.org.id)
+    entry = db.execute(
+        text("SELECT action, actor_user_id FROM audit_log WHERE entity_id = :id"),
+        {"id": beta.id},
+    ).one()
+    assert entry.action == "account.deleted"
+    assert entry.actor_user_id == seeded.a.admin.id
+
+
+def test_member_can_get_account_in_own_org(client, seeded, auth):
+    r = client.get(f"/api/accounts/{seeded.a.accounts[1].id}", headers=auth(seeded.a.member))
+    assert r.status_code == 200

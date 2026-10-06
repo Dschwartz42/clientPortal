@@ -130,3 +130,27 @@ def test_patch_rejects_empty_and_null_bodies(client, seeded, auth):
     assert _patch(client, headers, seeded.a.member, {}).status_code == 422
     assert _patch(client, headers, seeded.a.member, {"role": None}).status_code == 422
     assert _patch(client, headers, seeded.a.member, {"role": "owner"}).status_code == 422
+
+
+def test_member_cannot_patch_user(client, seeded, auth):
+    r = _patch(client, auth(seeded.a.member), seeded.a.member, {"role": "admin"})
+    assert r.status_code == 403
+
+
+def test_deactivate_then_reactivate_writes_audit_rows_in_order(client, db, seeded, auth):
+    admin = auth(seeded.a.admin)
+    assert _patch(client, admin, seeded.a.member, {"is_active": False}).status_code == 200
+    assert _patch(client, admin, seeded.a.member, {"is_active": True}).status_code == 200
+    set_tenant(db, seeded.a.org.id)
+    actions = (
+        db.execute(
+            text(
+                "SELECT action FROM audit_log WHERE entity_id = :id AND action LIKE 'user.%' "
+                "ORDER BY id"
+            ),
+            {"id": seeded.a.member.id},
+        )
+        .scalars()
+        .all()
+    )
+    assert actions == ["user.deactivated", "user.reactivated"]

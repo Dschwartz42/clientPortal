@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DataError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger(__name__)
 
 HTTP_CODES = {404: "not_found", 405: "method_not_allowed"}
 
@@ -19,6 +23,19 @@ def _envelope(status_code: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(
         status_code=status_code, content={"error": {"code": code, "message": message}}
     )
+
+
+async def catch_unexpected(request: Request, call_next):
+    """Turn an unexpected exception into the 500 envelope from inside the CORS middleware.
+
+    The catch-all exception handler runs in Starlette's outermost middleware, so its
+    response would carry no CORS headers and a browser would report a network error.
+    """
+    try:
+        return await call_next(request)
+    except Exception:
+        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+        return _envelope(500, "internal_error", "Internal server error")
 
 
 def register_error_handlers(app: FastAPI) -> None:

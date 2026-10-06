@@ -83,7 +83,10 @@ def timeseries(
     to: date | None = None,
 ):
     end = to or datetime.now(UTC).date()
-    start = from_ or end - timedelta(days=365)
+    try:
+        start = from_ or end - timedelta(days=365)
+    except OverflowError:
+        raise ApiError(422, "validation_error", "to: date is too early") from None
     if start > end:
         raise ApiError(422, "validation_error", "from: must not be after to")
     if (end - start).days > MAX_RANGE_DAYS:
