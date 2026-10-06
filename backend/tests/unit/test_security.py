@@ -57,3 +57,7 @@ def test_token_without_exp_rejected():
     )
     with pytest.raises(jwt.MissingRequiredClaimError):
         decode_access_token(token)
+
+
+def test_deliberately_red():
+    assert False
