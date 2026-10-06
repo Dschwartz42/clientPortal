@@ -149,6 +149,7 @@ def seeded(db) -> Seeded:
     a = _make_org(db, "orga", "Org A")
     b = _make_org(db, "orgb", "Org B")
     db.execute(CLEAR_TENANT)
+    db.info.pop("org_id", None)
     return Seeded(a=a, b=b, password=PASSWORD)
 
 

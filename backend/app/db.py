@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
 from app.config import settings
 
-engine = create_engine(settings.database_url, pool_pre_ping=True)
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    # Keep statement parameters (password hashes, emails) out of SQLAlchemy error text.
+    hide_parameters=True,
+)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 _SET_TENANT = text("SELECT set_config('app.current_org_id', :org_id, true)")
