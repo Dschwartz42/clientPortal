@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from 'react'
+import { type ReactNode, useEffect, useId, useRef } from 'react'
 
 interface Props {
   title: string
@@ -8,6 +8,19 @@ interface Props {
 }
 
 export function Modal({ title, open, onClose, children }: Props) {
+  const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  // Move focus into the dialog on open; restore it to the previous element on close/unmount.
+  useEffect(() => {
+    if (!open) return
+    const previous = document.activeElement
+    dialogRef.current?.focus()
+    return () => {
+      if (previous instanceof HTMLElement) previous.focus()
+    }
+  }, [open])
+
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
@@ -24,13 +37,15 @@ export function Modal({ title, open, onClose, children }: Props) {
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
-        className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg bg-white p-6 shadow-xl focus:outline-none"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 className="mb-4 text-lg font-semibold">{title}</h2>
+        <h2 id={titleId} className="mb-4 text-lg font-semibold">{title}</h2>
         {children}
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { Modal } from './Modal'
 
@@ -47,5 +48,50 @@ describe('Modal', () => {
     const backdrop = screen.getByRole('dialog').parentElement as HTMLElement
     await userEvent.click(backdrop)
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves focus into the dialog on open', () => {
+    render(
+      <Modal title="Edit" open onClose={vi.fn()}>
+        <p>body</p>
+      </Modal>,
+    )
+    expect(screen.getByRole('dialog')).toHaveFocus()
+  })
+
+  it('returns focus to the opener after closing', async () => {
+    function Host() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>Open</button>
+          <Modal title="Edit" open={open} onClose={() => setOpen(false)}>
+            <p>body</p>
+          </Modal>
+        </>
+      )
+    }
+    render(<Host />)
+    const opener = screen.getByRole('button', { name: 'Open' })
+    await userEvent.click(opener)
+    expect(screen.getByRole('dialog')).toHaveFocus()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+  })
+
+  it('does not steal focus back on re-render', async () => {
+    const { rerender } = render(
+      <Modal title="Edit" open onClose={vi.fn()}>
+        <input aria-label="field" />
+      </Modal>,
+    )
+    await userEvent.click(screen.getByLabelText('field'))
+    rerender(
+      <Modal title="Edit" open onClose={vi.fn()}>
+        <input aria-label="field" />
+      </Modal>,
+    )
+    expect(screen.getByLabelText('field')).toHaveFocus()
   })
 })

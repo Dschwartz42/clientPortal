@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ReactNode, SyntheticEvent } from 'react'
 import { Button } from './Button'
 import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
@@ -32,6 +32,15 @@ function cell<T>(row: T, column: Column<T>): ReactNode {
   return value === null || value === undefined ? '' : String(value)
 }
 
+const INTERACTIVE = 'a, button, input, select, textarea, label, [role="button"]'
+
+/** True when the event came from an interactive element inside the row (not the row itself). */
+function fromInteractive(event: SyntheticEvent<HTMLElement>): boolean {
+  if (!(event.target instanceof Element)) return false
+  const inner = event.target.closest(INTERACTIVE)
+  return inner !== null && inner !== event.currentTarget && event.currentTarget.contains(inner)
+}
+
 export function DataTable<T>({
   columns,
   rows,
@@ -53,8 +62,12 @@ export function DataTable<T>({
     page !== undefined && pageSize !== undefined && total !== undefined && onPageChange
       ? { page, total, onPageChange }
       : null
-  const first = pager && pager.total > 0 ? (pager.page - 1) * (pageSize ?? 0) + 1 : 0
-  const last = pager ? Math.min(pager.page * (pageSize ?? 0), pager.total) : 0
+  // Clamp to the last valid page so the range is never inverted.
+  const size = pageSize ?? 0
+  const lastPage = pager && size > 0 ? Math.max(1, Math.ceil(pager.total / size)) : 1
+  const shown = pager ? Math.min(pager.page, lastPage) : 1
+  const first = pager && pager.total > 0 ? (shown - 1) * size + 1 : 0
+  const last = pager ? Math.min(shown * size, pager.total) : 0
 
   return (
     <div>
@@ -97,14 +110,20 @@ export function DataTable<T>({
                 <tr
                   key={rowKey ? rowKey(row) : index}
                   className={`border-b border-slate-100 last:border-0 ${
-                    onRowClick ? 'cursor-pointer hover:bg-slate-50' : ''
+                    onRowClick ? 'cursor-pointer hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-slate-500' : ''
                   }`}
                   tabIndex={onRowClick ? 0 : undefined}
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onClick={
+                    onRowClick
+                      ? (event) => {
+                          if (!fromInteractive(event)) onRowClick(row)
+                        }
+                      : undefined
+                  }
                   onKeyDown={
                     onRowClick
                       ? (event) => {
-                          if (event.key === 'Enter') onRowClick(row)
+                          if (event.key === 'Enter' && !fromInteractive(event)) onRowClick(row)
                         }
                       : undefined
                   }
@@ -134,14 +153,14 @@ export function DataTable<T>({
           <div className="flex gap-2">
             <Button
               variant="secondary"
-              disabled={pager.page <= 1}
+              disabled={loading || pager.page <= 1}
               onClick={() => pager.onPageChange(pager.page - 1)}
             >
               Previous
             </Button>
             <Button
               variant="secondary"
-              disabled={last >= pager.total}
+              disabled={loading || last >= pager.total}
               onClick={() => pager.onPageChange(pager.page + 1)}
             >
               Next

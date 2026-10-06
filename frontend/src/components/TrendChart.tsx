@@ -10,14 +10,13 @@ import {
   YAxis,
 } from 'recharts'
 import { type Format, formatPeriod, formatValue } from '../lib/format'
+import { formatTick } from './chartFormat'
 
 interface Props {
   data: { period: string; value: string | number }[]
   type?: 'line' | 'bar'
   format?: Format
 }
-
-const compact = new Intl.NumberFormat('en-US', { notation: 'compact' })
 
 export function TrendChart({ data, type = 'line', format = 'number' }: Props) {
   // Money arrives as strings; convert once here, for plotting only.
@@ -29,7 +28,7 @@ export function TrendChart({ data, type = 'line', format = 'number' }: Props) {
     <>
       <CartesianGrid strokeDasharray="3 3" vertical={false} />
       <XAxis dataKey="period" tick={{ fontSize: 12 }} />
-      <YAxis tick={{ fontSize: 12 }} width={48} tickFormatter={(v: number) => compact.format(v)} />
+      <YAxis tick={{ fontSize: 12 }} width={48} tickFormatter={(v: number) => formatTick(v, format)} />
       <Tooltip formatter={(v) => formatValue(Number(v), format)} />
     </>
   )

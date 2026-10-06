@@ -128,9 +128,84 @@ describe('DataTable', () => {
       />,
     )
     expect(screen.getByText('Showing 0–0 of 0')).toBeInTheDocument()
-    expect(screen.queryByText(/-\d/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Showing/)).toHaveTextContent(/^Showing 0–0 of 0$/)
     expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+  })
+
+  it('clamps the range when the page is past the last page', async () => {
+    const onPageChange = vi.fn()
+    render(
+      <DataTable
+        columns={columns} rows={[]} page={5} pageSize={2} total={5} onPageChange={onPageChange}
+      />,
+    )
+    expect(screen.getByText('Showing 5–5 of 5')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+  })
+
+  it('disables the pager buttons while loading', () => {
+    render(
+      <DataTable
+        columns={columns} rows={rows} loading page={2} pageSize={2} total={10}
+        onPageChange={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+  })
+
+  describe('interactive elements inside a clickable row', () => {
+    function setup() {
+      const onRowClick = vi.fn()
+      const onInner = vi.fn()
+      const cols: Column<Row>[] = [
+        { key: 'name', header: 'Name' },
+        {
+          key: 'action',
+          header: 'Action',
+          render: (row) => (
+            <button type="button" onClick={() => onInner(row.id)}>
+              Edit {row.name}
+            </button>
+          ),
+        },
+      ]
+      render(<DataTable columns={cols} rows={rows} onRowClick={onRowClick} />)
+      return { onRowClick, onInner }
+    }
+
+    it('does not fire the row action when a cell button is clicked', async () => {
+      const { onRowClick, onInner } = setup()
+      await userEvent.click(screen.getByRole('button', { name: 'Edit Alpha' }))
+      expect(onInner).toHaveBeenCalledTimes(1)
+      expect(onRowClick).not.toHaveBeenCalled()
+    })
+
+    it('does not fire the row action when Enter is pressed on a focused cell button', async () => {
+      const { onRowClick, onInner } = setup()
+      screen.getByRole('button', { name: 'Edit Alpha' }).focus()
+      await userEvent.keyboard('{Enter}')
+      expect(onInner).toHaveBeenCalledTimes(1)
+      expect(onRowClick).not.toHaveBeenCalled()
+    })
+
+    it('still fires once for plain cell text', async () => {
+      const { onRowClick } = setup()
+      await userEvent.click(screen.getByText('Alpha'))
+      expect(onRowClick).toHaveBeenCalledTimes(1)
+      expect(onRowClick).toHaveBeenCalledWith(rows[0])
+    })
+
+    it('still fires once for Enter on the focused row', async () => {
+      const { onRowClick } = setup()
+      const body = screen.getAllByRole('rowgroup')[1]
+      within(body).getAllByRole('row')[0].focus()
+      await userEvent.keyboard('{Enter}')
+      expect(onRowClick).toHaveBeenCalledTimes(1)
+      expect(onRowClick).toHaveBeenCalledWith(rows[0])
+    })
   })
 
   it.each([
