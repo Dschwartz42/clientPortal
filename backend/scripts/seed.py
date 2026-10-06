@@ -15,6 +15,7 @@ from decimal import Decimal
 
 from faker import Faker
 from sqlalchemy import create_engine, func, insert, select, text
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -57,6 +58,43 @@ ORGS = [
     # Big spike in month 9, then back to normal.
     OrgSpec("Umbrella Health", "umbrella", "pro", 70, 0.05, lambda m: 3.0 if m == 8 else 1.0),
 ]
+
+
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def is_local_host(host: str | None) -> bool:
+    """True for loopback hosts and for a unix socket (no host)."""
+    return not host or host in LOCAL_HOSTS
+
+
+def describe_target(url: URL) -> str:
+    """One line naming the target. Never includes the password."""
+    return f'Seeding database "{url.database}" on {url.host or "local socket"}:{url.port or 5432} as {url.username}'
+
+
+def transacting_span(
+    opened_at: date, closed_at: date | None, window_start: date, month: int, month_days: int
+) -> tuple[date, date] | None:
+    """The days of 30-day bucket `month` on which an account can transact, or None."""
+    month_start = window_start + timedelta(days=month_days * month)
+    month_end = month_start + timedelta(days=month_days)
+    first = max(month_start, opened_at)
+    last = min(month_end, closed_at or month_end)
+    return (first, last) if first < last else None
+
+
+def eligible_counts(
+    pairs: list[tuple[date, date | None]], window_start: date, months: int, month_days: int
+) -> list[int]:
+    """Accounts that can transact in each bucket, given (opened_at, closed_at) pairs."""
+    return [
+        sum(
+            transacting_span(opened, closed, window_start, month, month_days) is not None
+            for opened, closed in pairs
+        )
+        for month in range(months)
+    ]
 
 
 def _uuid() -> uuid.UUID:
@@ -132,20 +170,26 @@ def seed_org(
     session.add_all(accounts)
     session.flush()
 
+    # Charges are divided by the realised eligible-account count so the multiplier is the
+    # only growth. Counting draws no random numbers.
+    eligible = eligible_counts(
+        [(a.opened_at, a.closed_at) for a in accounts], window_start, MONTHS, MONTH_DAYS
+    )
     transactions = []
     for month in range(MONTHS):
-        month_start = window_start + timedelta(days=MONTH_DAYS * month)
-        month_end = month_start + timedelta(days=MONTH_DAYS)
+        scale = eligible[0] / eligible[month] if eligible[month] and eligible[0] else 1.0
         for account in accounts:
-            first = max(month_start, account.opened_at)
-            last = min(month_end, account.closed_at or month_end)
-            if first >= last:
+            span = transacting_span(
+                account.opened_at, account.closed_at, window_start, month, MONTH_DAYS
+            )
+            if span is None:
                 continue
+            first, last = span
             for _ in range(random.choice([1, 1, 2])):
                 type_ = random.choices(TYPES, weights=[90, 6, 4])[0]
                 base = TIER_BASE[account.tier] * random.uniform(0.7, 1.3)
                 if type_ == "charge":
-                    amount = base * spec.multiplier(month)
+                    amount = base * spec.multiplier(month) * scale
                 else:
                     amount = base * random.uniform(0.2, 0.6)
                 offset = random.randint(0, (last - first).days * 86400 - 1)
@@ -211,10 +255,10 @@ def seed_org(
     return org_id
 
 
-def print_summary(session: Session, org_ids: dict[str, uuid.UUID]) -> None:
-    print(
+def summary_lines(session: Session, org_ids: dict[str, uuid.UUID]) -> list[str]:
+    lines = [
         f"{'org':<10}{'users':>7}{'accounts':>10}{'transactions':>14}{'audit':>7}{'net revenue':>16}"
-    )
+    ]
     for slug, org_id in org_ids.items():
         set_tenant(session, org_id)
         counts = [
@@ -223,23 +267,35 @@ def print_summary(session: Session, org_ids: dict[str, uuid.UUID]) -> None:
         ]
         rows = session.execute(select(Transaction.type, Transaction.amount)).all()
         total = net_revenue((row.type, row.amount) for row in rows)
-        print(f"{slug:<10}{counts[0]:>7}{counts[1]:>10}{counts[2]:>14}{counts[3]:>7}{total:>16}")
-    print(f"\nDemo logins (password {DEMO_PASSWORD}, demo only):")
-    for slug in org_ids:
-        print(f"  admin@{slug}.test   member@{slug}.test")
+        lines.append(
+            f"{slug:<10}{counts[0]:>7}{counts[1]:>10}{counts[2]:>14}{counts[3]:>7}{total:>16}"
+        )
+    lines.append(f"\nDemo logins (password {DEMO_PASSWORD}, demo only):")
+    lines += [f"  admin@{slug}.test   member@{slug}.test" for slug in org_ids]
+    return lines
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed deterministic demo data.")
     parser.add_argument("--reset", action="store_true", help="truncate all tables first")
+    parser.add_argument("--yes", action="store_true", help="allow a non-local database")
     args = parser.parse_args()
+
+    if not settings.migration_database_url:
+        print("MIGRATION_DATABASE_URL (the portal_owner URL) is required to seed.")
+        sys.exit(2)
+    url = make_url(settings.migration_database_url)
+    print(describe_target(url))
+    if not is_local_host(url.host) and not args.yes:
+        print("This is not a local database. Re-run with --yes to seed it anyway.")
+        sys.exit(2)
 
     Faker.seed(42)
     random.seed(42)
     fake = Faker()
     today = datetime.now(UTC).date()
     password_hash = hash_password(DEMO_PASSWORD)
-    engine = create_engine(settings.migration_database_url or settings.database_url)
+    engine = create_engine(url)
 
     with Session(engine) as session:
         if args.reset:
@@ -255,10 +311,13 @@ def main() -> None:
             }
         except IntegrityError:
             session.rollback()
+            if args.reset:
+                raise
             print("Seed data already exists. Re-run with --reset to replace it.")
             sys.exit(1)
-        print_summary(session, org_ids)
+        lines = summary_lines(session, org_ids)
         session.commit()
+    print("\n".join(lines))
 
 
 if __name__ == "__main__":
