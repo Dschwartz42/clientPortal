@@ -209,6 +209,32 @@ def test_actor_demoted_while_waiting_is_forbidden(client, conn, db, seeded, auth
     assert r.json()["error"] == {"code": "forbidden", "message": "Admin role required"}
 
 
+def test_target_is_re_read_after_the_admin_lock(client, conn, db, seeded, auth):
+    # The target X is a member when the request starts; a concurrent change promotes X
+    # before the lock is taken. The handler must act on the fresh row, so demoting X is
+    # a real change (before: admin) and is audited as such.
+    a, x = seeded.a.admin, seeded.a.member
+    headers = auth(a)
+    with _before_first_admin_lock(conn, [_set_role(x, "admin")]):
+        r = _patch(client, headers, x, {"role": "member"})
+    assert r.status_code == 200, r.json()
+    set_tenant(db, seeded.a.org.id)
+    role = db.execute(text("SELECT role FROM users WHERE id = :id"), {"id": x.id}).scalar_one()
+    assert role == "member"
+    details = (
+        db.execute(
+            text(
+                "SELECT details FROM audit_log"
+                " WHERE entity_id = :id AND action = 'user.role_changed'"
+            ),
+            {"id": x.id},
+        )
+        .scalars()
+        .all()
+    )
+    assert details == [{"before": {"role": "admin"}, "after": {"role": "member"}}]
+
+
 def test_database_errors_do_not_log_parameters(client, conn, seeded, auth, caplog):
     def break_insert(connection, cursor, statement, parameters, context, executemany):
         if statement.lstrip().startswith("INSERT INTO users"):
