@@ -123,7 +123,7 @@ def top_accounts(
         )
         .where(Account.org_id == user.org_id, Transaction.occurred_at >= since)
         .group_by(Account.id, Account.name, Account.tier)
-        .order_by(net.desc(), Account.name)
+        .order_by(net.desc(), Account.name, Account.id)
         .limit(limit)
     ).all()
     return [

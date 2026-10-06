@@ -37,6 +37,8 @@ def test_action_filter_rejects_nul_characters(client, seeded, auth):
     r = client.get("/api/audit-log?action=account.%00created", headers=auth(seeded.a.admin))
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "validation_error"
+    # Only the schema validator names the parameter; the database backstop does not.
+    assert r.json()["error"]["message"].startswith("query.action:")
 
 
 def test_other_orgs_entries_are_invisible(client, seeded, auth):

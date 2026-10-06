@@ -57,9 +57,11 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(DataError)
     async def _data_error(request: Request, exc: DataError) -> JSONResponse:
         # Backstop for values the database rejects that schema validation did not catch.
+        logger.warning("Database rejected a value on %s %s", request.method, request.url.path)
         return _envelope(422, "validation_error", "Request contains a value the database rejects")
 
     @app.exception_handler(Exception)
     async def _unexpected(request: Request, exc: Exception) -> JSONResponse:
-        # Generic on purpose: nothing about the failure is revealed to the client.
+        # Route errors are handled by the catch_unexpected middleware; this only covers
+        # failures outside it. Generic on purpose: nothing about the failure is revealed to the client.
         return _envelope(500, "internal_error", "Internal server error")
