@@ -1,13 +1,47 @@
+import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useAuth } from './AuthContext'
+import { type AuthState, useAuth } from './AuthContext'
 import { AuthProvider } from './AuthProvider'
 import { getToken, setToken } from './tokenStore'
 
+const latest: { auth: AuthState | null } = { auth: null }
+const authRef = {
+  login: (email: string, password: string) => latest.auth!.login(email, password),
+  logout: () => latest.auth!.logout(),
+}
+
 function Probe() {
-  const { user, loading } = useAuth()
-  return <p data-testid="probe">{loading ? 'loading' : (user?.email ?? 'anonymous')}</p>
+  const auth = useAuth()
+  useEffect(() => {
+    latest.auth = auth
+  })
+  const { user, loading } = auth
+  return (
+    <p data-testid="probe">
+      {loading ? 'loading' : (user?.email ?? 'anonymous')}
+    </p>
+  )
+}
+
+function deferredFetch() {
+  const pending: Array<(r: Response) => void> = []
+  const fetchMock = vi.fn((input: URL | RequestInfo) => {
+    const url = String(input)
+    if (url.includes('/api/auth/login')) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ access_token: 'tokB', user: userB }), { status: 200 }),
+      )
+    }
+    return new Promise<Response>((resolve) => pending.push(resolve))
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return pending
+}
+
+const userB = {
+  id: '2', email: 'b@acme.test', full_name: 'B', role: 'member', org_id: 'o2', org_name: 'Other',
 }
 
 function renderProvider(queryClient = new QueryClient()) {
@@ -64,6 +98,50 @@ describe('AuthProvider', () => {
     act(() => setToken(null))
 
     expect(await screen.findByText('anonymous')).toBeInTheDocument()
+    expect(queryClient.getQueryData(['accounts'])).toBeUndefined()
+  })
+
+  describe('stale /me responses', () => {
+    it('keeps user B when the old /me later resolves 200 as user A', async () => {
+      setToken('tokA')
+      const pending = deferredFetch()
+      renderProvider()
+      expect(screen.getByTestId('probe')).toHaveTextContent('loading')
+      await act(() => authRef.login('b@acme.test', 'pw'))
+      expect(screen.getByTestId('probe')).toHaveTextContent('b@acme.test')
+      await act(async () => pending[0](new Response(JSON.stringify(me), { status: 200 })))
+      expect(screen.getByTestId('probe')).toHaveTextContent('b@acme.test')
+      expect(getToken()).toBe('tokB')
+    })
+
+    it('keeps user B when the old /me later resolves 401', async () => {
+      setToken('tokA')
+      const pending = deferredFetch()
+      renderProvider()
+      await act(() => authRef.login('b@acme.test', 'pw'))
+      const body = { error: { code: 'invalid_token', message: 'Invalid token' } }
+      await act(async () => pending[0](new Response(JSON.stringify(body), { status: 401 })))
+      expect(screen.getByTestId('probe')).toHaveTextContent('b@acme.test')
+      expect(getToken()).toBe('tokB')
+    })
+
+    it('keeps the user null when /me resolves 200 after logout', async () => {
+      setToken('tokA')
+      const pending = deferredFetch()
+      renderProvider()
+      act(() => authRef.logout())
+      expect(screen.getByTestId('probe')).toHaveTextContent('anonymous')
+      await act(async () => pending[0](new Response(JSON.stringify(me), { status: 200 })))
+      expect(screen.getByTestId('probe')).toHaveTextContent('anonymous')
+      expect(getToken()).toBeNull()
+    })
+  })
+
+  it('login clears previously cached query data', async () => {
+    deferredFetch()
+    const queryClient = renderProvider()
+    queryClient.setQueryData(['accounts'], { items: [] })
+    await act(() => authRef.login('b@acme.test', 'pw'))
     expect(queryClient.getQueryData(['accounts'])).toBeUndefined()
   })
 })

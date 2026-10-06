@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getToken, setToken } from '../auth/tokenStore'
-import { ApiError, apiFetch } from './client'
+import { ApiError, apiFetch, resolveBaseUrl } from './client'
 
 function mockFetch(status: number, body: unknown) {
   const fetchMock = vi.fn().mockResolvedValue(
@@ -65,5 +65,46 @@ describe('apiFetch', () => {
   it('returns undefined for 204', async () => {
     mockFetch(204, null)
     await expect(apiFetch('/api/accounts/1', { method: 'DELETE' })).resolves.toBeUndefined()
+  })
+
+  it('does not clear a newer token when a 401 arrives for an older session', async () => {
+    setToken('old')
+    let resolve!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise<Response>((r) => (resolve = r))))
+    const pending = apiFetch('/api/auth/me')
+    setToken('new')
+    resolve(new Response(JSON.stringify({ error: { code: 'invalid_token', message: 'x' } }), { status: 401 }))
+    await expect(pending).rejects.toBeInstanceOf(ApiError)
+    expect(getToken()).toBe('new')
+  })
+
+  it('clears the token on 401 when it is unchanged since the request was sent', async () => {
+    setToken('same')
+    let resolve!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise<Response>((r) => (resolve = r))))
+    const pending = apiFetch('/api/accounts')
+    resolve(new Response(JSON.stringify({ error: { code: 'invalid_token', message: 'x' } }), { status: 401 }))
+    await expect(pending).rejects.toBeInstanceOf(ApiError)
+    expect(getToken()).toBeNull()
+  })
+
+  it('sends no Authorization header when auth is false even if a token exists', async () => {
+    setToken('abc')
+    const fetchMock = mockFetch(200, { ok: true })
+    await apiFetch('/api/auth/login', { method: 'POST', body: {}, auth: false })
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined()
+  })
+})
+
+describe('resolveBaseUrl', () => {
+  it('uses the default when unset, empty or whitespace', () => {
+    expect(resolveBaseUrl(undefined)).toBe('http://localhost:8000')
+    expect(resolveBaseUrl('')).toBe('http://localhost:8000')
+    expect(resolveBaseUrl('   ')).toBe('http://localhost:8000')
+  })
+
+  it('trims trailing slashes and leaves a normal URL unchanged', () => {
+    expect(resolveBaseUrl('https://api.example.com/')).toBe('https://api.example.com')
+    expect(resolveBaseUrl('https://api.example.com')).toBe('https://api.example.com')
   })
 })

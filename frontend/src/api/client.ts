@@ -1,6 +1,14 @@
 import { getToken, setToken } from '../auth/tokenStore'
 
-const BASE_URL: string = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+const DEFAULT_BASE_URL = 'http://localhost:8000'
+
+/** Falls back to the default for unset/blank values and trims trailing slashes. */
+export function resolveBaseUrl(raw: string | undefined): string {
+  const trimmed = (raw ?? '').trim().replace(/\/+$/, '')
+  return trimmed === '' ? DEFAULT_BASE_URL : trimmed
+}
+
+const BASE_URL = resolveBaseUrl(import.meta.env.VITE_API_URL)
 
 export class ApiError extends Error {
   status: number
@@ -36,8 +44,8 @@ export async function apiFetch<T>(path: string, options: Options = {}): Promise<
 
   const headers: Record<string, string> = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
-  const token = getToken()
-  if (auth && token) headers.Authorization = `Bearer ${token}`
+  const sentWith = auth ? getToken() : null
+  if (sentWith) headers.Authorization = `Bearer ${sentWith}`
 
   let response: Response
   try {
@@ -50,7 +58,8 @@ export async function apiFetch<T>(path: string, options: Options = {}): Promise<
     throw new ApiError(0, 'network_error', 'Could not reach the server. Please try again.')
   }
 
-  if (response.status === 401 && auth) setToken(null)
+  // A 401 ends only the session the request was sent with, never a newer one.
+  if (response.status === 401 && sentWith !== null && getToken() === sentWith) setToken(null)
   if (response.status === 204) return undefined as T
 
   const data = await response.json().catch(() => null)

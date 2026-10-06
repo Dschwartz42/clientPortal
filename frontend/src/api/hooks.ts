@@ -36,6 +36,7 @@ export function useAccount(id: string) {
   return useQuery({
     queryKey: ['account', id],
     queryFn: () => apiFetch<AccountDetail>(`/api/accounts/${id}`),
+    enabled: Boolean(id),
   })
 }
 
@@ -47,6 +48,7 @@ export function useAccountTransactions(id: string, page: number) {
         params: { page, page_size: 10 },
       }),
     placeholderData: keepPreviousData,
+    enabled: Boolean(id),
   })
 }
 

@@ -12,14 +12,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // After a refresh the token survives in sessionStorage; ask the API who it belongs to.
   useEffect(() => {
-    if (getToken() === null) return
+    const requestedWith = getToken()
+    if (requestedWith === null) return
     let cancelled = false
     apiFetch<Me>('/api/auth/me')
       .then((me) => {
-        if (!cancelled) setUser(me)
+        // Ignore the answer if the session changed (login or logout) while it was in flight.
+        if (!cancelled && getToken() === requestedWith) setUser(me)
       })
       .catch(() => {
-        // A 401 has already cleared the token; any other failure leaves the user logged out.
+        // A 401 has already cleared the token. Any other failure (network, 500) deliberately
+        // keeps the token and shows no user: a transient outage should not destroy the
+        // session, and the next navigation or reload retries.
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -36,21 +40,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscribe(() => {
         if (getToken() === null) {
           setUser(null)
+          setLoading(false)
           queryClient.clear()
         }
       }),
     [queryClient],
   )
 
-  const login = useCallback(async (email: string, password: string) => {
-    const result = await apiFetch<LoginResponse>('/api/auth/login', {
-      method: 'POST',
-      body: { email, password },
-      auth: false,
-    })
-    setToken(result.access_token)
-    setUser(result.user)
-  }, [])
+  const login = useCallback(
+    async (email: string, password: string) => {
+      const result = await apiFetch<LoginResponse>('/api/auth/login', {
+        method: 'POST',
+        body: { email, password },
+        auth: false,
+      })
+      // Defense in depth: never let cached data outlive the session it was fetched for,
+      // even if a token is replaced without passing through null.
+      queryClient.clear()
+      setToken(result.access_token)
+      setUser(result.user)
+      // Any pending /me check belongs to the old token; its result is now irrelevant.
+      setLoading(false)
+    },
+    [queryClient],
+  )
 
   const logout = useCallback(() => setToken(null), [])
 

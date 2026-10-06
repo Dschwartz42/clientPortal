@@ -19,6 +19,7 @@ export function getToken(): string | null {
 }
 
 export function setToken(next: string | null): void {
+  if (next === token) return
   token = next
   try {
     if (next === null) sessionStorage.removeItem(KEY)
@@ -26,7 +27,16 @@ export function setToken(next: string | null): void {
   } catch {
     // Storage can be unavailable (private mode); the in-memory token still works.
   }
-  listeners.forEach((listener) => listener())
+  // Run every listener even if one throws, then rethrow the first error.
+  let failure: { error: unknown } | null = null
+  for (const listener of [...listeners]) {
+    try {
+      listener()
+    } catch (error) {
+      failure ??= { error }
+    }
+  }
+  if (failure) throw failure.error
 }
 
 export function subscribe(listener: () => void): () => void {
