@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -6,7 +7,7 @@ class Settings(BaseSettings):
 
     database_url: str
     migration_database_url: str | None = None
-    jwt_secret: str
+    jwt_secret: str = Field(min_length=32)
     jwt_expire_minutes: int = 60
     cors_origins: str = "http://localhost:5173"
 

@@ -94,3 +94,29 @@ def test_unknown_route_uses_error_envelope(client):
     r = client.get("/api/nope")
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "not_found"
+
+
+def _signed(**overrides):
+    claims = {
+        "sub": str(uuid.uuid4()),
+        "org_id": str(uuid.uuid4()),
+        "role": "admin",
+        "exp": 9999999999,
+        **overrides,
+    }
+    return jwt.encode(claims, settings.jwt_secret, algorithm="HS256")
+
+
+def test_non_string_sub_or_org_id_is_401_invalid_token(client, seeded):
+    for overrides in ({"sub": 5}, {"org_id": 5}, {"sub": None}, {"org_id": None}):
+        r = client.get("/api/auth/me", headers={"Authorization": f"Bearer {_signed(**overrides)}"})
+        assert r.status_code == 401, overrides
+        assert r.json()["error"]["code"] == "invalid_token"
+
+
+def test_login_is_401_if_user_vanishes_after_lookup(client, seeded, monkeypatch):
+    # With no tenant set, RLS hides the user row from the reload, as a concurrent delete would.
+    monkeypatch.setattr("app.routers.auth.set_tenant", lambda db, org_id: None)
+    r = _login(client, "admin@orga.test", seeded.password)
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "invalid_credentials"

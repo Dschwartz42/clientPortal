@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 
 
 def _url(account):
@@ -23,7 +23,7 @@ def test_lists_newest_first_with_string_amounts(client, seeded, auth):
 
 
 def test_from_and_to_filter_inclusively(client, seeded, auth):
-    today = date.today()
+    today = datetime.now(UTC).date()
     params = {"from": str(today - timedelta(days=13)), "to": str(today - timedelta(days=9))}
     r = client.get(_url(seeded.a.accounts[0]), params=params, headers=auth(seeded.a.member))
     assert sorted(t["amount"] for t in r.json()["items"]) == ["200.00", "500.00"]

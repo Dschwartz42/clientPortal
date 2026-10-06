@@ -38,4 +38,9 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> dict:
-    return jwt.decode(token, settings.jwt_secret, algorithms=[ALGORITHM])
+    return jwt.decode(
+        token,
+        settings.jwt_secret,
+        algorithms=[ALGORITHM],
+        options={"require": ["exp", "sub", "org_id", "role"]},
+    )

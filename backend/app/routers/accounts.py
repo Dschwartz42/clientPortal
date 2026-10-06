@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
@@ -54,10 +54,10 @@ def _check_owner(db: Session, user: User, owner_user_id: uuid.UUID | None) -> No
         raise ApiError(422, "validation_error", "owner_user_id: no such user in this organization")
 
 
-def _snapshot(account: Account, fields=AUDITED) -> dict:
+def _snapshot(account: Account) -> dict:
     return {
         field: None if getattr(account, field) is None else str(getattr(account, field))
-        for field in fields
+        for field in AUDITED
     }
 
 
@@ -102,7 +102,7 @@ def list_accounts(
 @router.post("", response_model=AccountOut, status_code=201)
 def create_account(body: AccountCreate, admin: AdminUser, db: Db):
     _check_owner(db, admin, body.owner_user_id)
-    today = date.today()
+    today = datetime.now(UTC).date()
     account = Account(
         id=uuid.uuid4(),
         org_id=admin.org_id,  # always the caller's org; the body has no org_id field
@@ -153,7 +153,7 @@ def update_account(account_id: uuid.UUID, body: AccountUpdate, admin: AdminUser,
     for field, value in changes.items():
         setattr(account, field, value)
     if "status" in changes and str(changes["status"]) != before["status"]:
-        account.closed_at = date.today() if changes["status"] == "closed" else None
+        account.closed_at = datetime.now(UTC).date() if changes["status"] == "closed" else None
     db.flush()
     db.refresh(account)
     after = _snapshot(account)

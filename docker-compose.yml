@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./backend/scripts/ci_db_setup.sql:/docker-entrypoint-initdb.d/01_setup.sql:ro

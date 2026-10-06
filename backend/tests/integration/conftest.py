@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -85,7 +85,7 @@ def _make_org(db: Session, slug: str, name: str) -> OrgFixture:
     )
     db.add_all([admin, member])
     db.flush()
-    today = date.today()
+    today = datetime.now(UTC).date()
     accounts = [
         Account(
             id=uuid.uuid4(),

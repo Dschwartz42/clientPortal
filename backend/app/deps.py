@@ -27,7 +27,7 @@ def get_current_user(
         claims = decode_access_token(credentials.credentials)
         user_id = uuid.UUID(claims["sub"])
         org_id = uuid.UUID(claims["org_id"])
-    except (jwt.InvalidTokenError, KeyError, ValueError):
+    except (jwt.InvalidTokenError, KeyError, ValueError, TypeError, AttributeError):
         raise ApiError(401, "invalid_token", "Invalid or expired token") from None
 
     set_tenant(db, org_id)

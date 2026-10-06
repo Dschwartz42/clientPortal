@@ -45,3 +45,15 @@ def test_tampered_token_rejected():
     )
     with pytest.raises(jwt.InvalidSignatureError):
         decode_access_token(forged)
+
+
+def test_token_without_exp_rejected():
+    from app.config import settings
+
+    token = jwt.encode(
+        {"sub": str(uuid.uuid4()), "org_id": str(uuid.uuid4()), "role": "admin"},
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
+    with pytest.raises(jwt.MissingRequiredClaimError):
+        decode_access_token(token)

@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 
@@ -99,7 +99,7 @@ def test_create_uses_callers_org_even_if_body_sends_another(client, db, seeded, 
     assert r.status_code == 201
     created = r.json()
     assert created["status"] == "active"
-    assert created["opened_at"] == date.today().isoformat()
+    assert created["opened_at"] == datetime.now(UTC).date().isoformat()
     assert _row(db, seeded.a.org.id, created["id"]).org_id == seeded.a.org.id
     assert _row(db, seeded.b.org.id, created["id"]) is None
 
@@ -141,7 +141,7 @@ def test_patch_closing_sets_closed_at_and_audits_before_after(client, db, seeded
         f"/api/accounts/{beta.id}", json={"status": "closed"}, headers=auth(seeded.a.admin)
     )
     assert r.status_code == 200
-    assert r.json()["closed_at"] == date.today().isoformat()
+    assert r.json()["closed_at"] == datetime.now(UTC).date().isoformat()
     set_tenant(db, seeded.a.org.id)
     details = db.execute(
         text("SELECT details FROM audit_log WHERE entity_id = :id AND action = 'account.updated'"),

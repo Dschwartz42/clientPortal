@@ -41,6 +41,8 @@ def login(body: LoginIn, db: Db) -> LoginOut:
 
     set_tenant(db, row.org_id)
     user = db.scalar(select(User).where(User.id == row.id, User.org_id == row.org_id))
+    if user is None:
+        raise ApiError(401, "invalid_credentials", "Invalid email or password")
     user.last_login_at = datetime.now(UTC)
     out = LoginOut(
         access_token=create_access_token(user.id, user.org_id, user.role), user=_me(db, user)

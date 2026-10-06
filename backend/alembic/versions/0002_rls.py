@@ -37,9 +37,10 @@ def upgrade() -> None:
         """
         CREATE FUNCTION auth_find_user(p_email citext)
         RETURNS TABLE (id uuid, org_id uuid, password_hash text, role text, is_active boolean)
-        LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+        LANGUAGE sql SECURITY DEFINER
+        SET search_path = public, pg_temp AS $$
             SELECT u.id, u.org_id, u.password_hash, u.role, u.is_active
-            FROM users u WHERE u.email = p_email;
+            FROM public.users u WHERE u.email = p_email;
         $$
         """
     )
