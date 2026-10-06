@@ -189,3 +189,34 @@ def test_delete_account_without_transactions(client, db, seeded, auth):
 def test_get_unknown_account_is_404(client, seeded, auth):
     r = client.get(f"/api/accounts/{uuid.uuid4()}", headers=auth(seeded.a.admin))
     assert r.status_code == 404
+
+
+def test_patch_same_value_in_different_format_writes_no_audit_entry(client, db, seeded, auth):
+    alpha = seeded.a.accounts[0]
+    r = client.patch(
+        f"/api/accounts/{alpha.id}", json={"monthly_value": "1000"}, headers=auth(seeded.a.admin)
+    )
+    assert r.status_code == 200
+    assert r.json()["monthly_value"] == "1000.00"
+    set_tenant(db, seeded.a.org.id)
+    count = db.execute(
+        text("SELECT count(*) FROM audit_log WHERE entity_id = :id"), {"id": alpha.id}
+    ).scalar_one()
+    assert count == 0
+
+
+def test_patch_audit_values_are_normalized(client, db, seeded, auth):
+    alpha = seeded.a.accounts[0]
+    r = client.patch(
+        f"/api/accounts/{alpha.id}", json={"monthly_value": "1200"}, headers=auth(seeded.a.admin)
+    )
+    assert r.status_code == 200
+    set_tenant(db, seeded.a.org.id)
+    details = db.execute(
+        text("SELECT details FROM audit_log WHERE entity_id = :id AND action = 'account.updated'"),
+        {"id": alpha.id},
+    ).scalar_one()
+    assert details == {
+        "before": {"monthly_value": "1000.00"},
+        "after": {"monthly_value": "1200.00"},
+    }

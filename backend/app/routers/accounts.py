@@ -152,6 +152,8 @@ def update_account(account_id: uuid.UUID, body: AccountUpdate, admin: AdminUser,
         setattr(account, field, value)
     if "status" in changes and str(changes["status"]) != before["status"]:
         account.closed_at = date.today() if changes["status"] == "closed" else None
+    db.flush()
+    db.refresh(account)
     after = _snapshot(account)
 
     changed = [field for field in AUDITED if before[field] != after[field]]
@@ -167,7 +169,6 @@ def update_account(account_id: uuid.UUID, body: AccountUpdate, admin: AdminUser,
                 "after": {field: after[field] for field in changed},
             },
         )
-    db.flush()
     out = AccountOut.model_validate(account)
     db.commit()
     return out
