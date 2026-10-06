@@ -6,7 +6,7 @@ from sqlalchemy import text
 from app.config import settings
 from app.db import engine
 from app.errors import register_error_handlers
-from app.routers import accounts, analytics, auth, transactions
+from app.routers import accounts, analytics, auth, transactions, users
 
 app = FastAPI(title="Client Portal API")
 app.add_middleware(
@@ -20,6 +20,7 @@ app.include_router(auth.router)
 app.include_router(accounts.router)
 app.include_router(analytics.router)
 app.include_router(transactions.router)
+app.include_router(users.router)
 
 
 @app.get("/health")
