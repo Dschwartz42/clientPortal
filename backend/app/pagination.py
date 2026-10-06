@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import Depends, Query
 
 MAX_PAGE_SIZE = 100
+MAX_PAGE = 1_000_000
 
 
 @dataclass
@@ -17,7 +18,7 @@ class Page:
 
 
 def page_params(
-    page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1)] = 25
+    page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1, page_size: Annotated[int, Query(ge=1)] = 25
 ) -> Page:
     return Page(page=page, page_size=min(page_size, MAX_PAGE_SIZE))
 

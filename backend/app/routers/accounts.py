@@ -1,7 +1,8 @@
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from typing import Annotated
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Query, Response
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,7 @@ from app.schemas.accounts import (
     Tier,
 )
 from app.schemas.common import Paginated
+from app.schemas.types import NoNulStr
 from app.services import audit
 from app.services.analytics import net_revenue_between
 
@@ -70,7 +72,7 @@ def list_accounts(
     page: PageDep,
     status: Status | None = None,
     tier: Tier | None = None,
-    search: str | None = None,
+    search: Annotated[NoNulStr | None, Query()] = None,
     sort: str = "name",
 ):
     column = SORTABLE.get(sort.removeprefix("-"))

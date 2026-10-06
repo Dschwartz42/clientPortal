@@ -32,7 +32,7 @@ def list_transactions(
     conditions = [Transaction.org_id == user.org_id, Transaction.account_id == account.id]
     if from_ is not None:
         conditions.append(Transaction.occurred_at >= _start_of_day(from_))
-    if to is not None:
+    if to is not None and to < date.max:  # date.max + 1 day would overflow; no upper bound needed
         conditions.append(Transaction.occurred_at < _start_of_day(to + timedelta(days=1)))
 
     total = db.scalar(select(func.count()).select_from(Transaction).where(*conditions))

@@ -3,11 +3,24 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
+
+from app.schemas.types import reject_nul
 
 Status = Literal["active", "paused", "closed"]
 Tier = Literal["bronze", "silver", "gold"]
-Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+Name = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=200),
+    AfterValidator(reject_nul),
+]
 MonthlyValue = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2)]
 
 

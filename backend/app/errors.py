@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DataError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 HTTP_CODES = {404: "not_found", 405: "method_not_allowed"}
@@ -35,3 +36,13 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = HTTP_CODES.get(exc.status_code, "http_error")
         return _envelope(exc.status_code, code, str(exc.detail))
+
+    @app.exception_handler(DataError)
+    async def _data_error(request: Request, exc: DataError) -> JSONResponse:
+        # Backstop for values the database rejects that schema validation did not catch.
+        return _envelope(422, "validation_error", "Request contains a value the database rejects")
+
+    @app.exception_handler(Exception)
+    async def _unexpected(request: Request, exc: Exception) -> JSONResponse:
+        # Generic on purpose: nothing about the failure is revealed to the client.
+        return _envelope(500, "internal_error", "Internal server error")
