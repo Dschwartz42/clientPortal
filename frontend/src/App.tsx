@@ -3,9 +3,11 @@ import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppShell } from './components/AppShell'
 import { AccountDetailPage } from './pages/AccountDetailPage'
 import { AccountsPage } from './pages/AccountsPage'
+import { AuditLogPage } from './pages/AuditLogPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { LoginPage } from './pages/LoginPage'
 import { NotFoundPage } from './pages/NotFoundPage'
+import { UsersPage } from './pages/UsersPage'
 
 export default function App() {
   return (
@@ -18,8 +20,8 @@ export default function App() {
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="accounts/:id" element={<AccountDetailPage />} />
           <Route element={<ProtectedRoute role="admin" />}>
-            <Route path="admin/users" element={<NotFoundPage />} />
-            <Route path="admin/audit" element={<NotFoundPage />} />
+            <Route path="admin/users" element={<UsersPage />} />
+            <Route path="admin/audit" element={<AuditLogPage />} />
           </Route>
           <Route path="*" element={<NotFoundPage />} />
         </Route>

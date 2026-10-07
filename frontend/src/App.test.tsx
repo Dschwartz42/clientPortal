@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -61,6 +61,31 @@ describe('App routing', () => {
     expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Audit log' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['/admin/users', 'Users', 'Invite user'],
+    ['/admin/audit', 'Audit log', null],
+  ])('renders %s for an admin', async (path, heading, button) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [], total: 0, page: 1, page_size: 25 }))))
+    renderApp(path, { user: makeUser('admin') })
+    expect(screen.getByRole('heading', { name: heading, level: 1 })).toBeInTheDocument()
+    if (button) expect(screen.getByRole('button', { name: button })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading' })).not.toBeInTheDocument())
+  })
+
+  it.each([
+    ['/admin/users', 'Users'],
+    ['/admin/audit', 'Audit log'],
+  ])('renders not-found for %s as a member, not the page', (path, heading) => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    renderApp(path, { user: makeUser('member') })
+    expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: heading, level: 1 })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Invite user' })).not.toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('shows the admin links to an admin', () => {
