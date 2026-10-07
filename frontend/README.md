@@ -5,6 +5,8 @@ It talks to the FastAPI backend in `../backend`.
 
 ## Commands
 
+Requires Node 22 (22.22.2) or newer; `.nvmrc` pins the major version.
+
 ```bash
 npm run dev               # start the dev server
 npm run test -- --run     # run the Vitest suite once
