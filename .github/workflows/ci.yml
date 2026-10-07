@@ -9,14 +9,16 @@ on:
 permissions:
   contents: read
 
-# A new push to a pull request cancels its superseded run; pushes to main always finish.
+# A new push to a pull request cancels that pull request's superseded run. Pushes to main
+# get a group of their own (the run id), so they are never cancelled or superseded.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -63,6 +65,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
