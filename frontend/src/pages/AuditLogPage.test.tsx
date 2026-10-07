@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setToken } from '../auth/tokenStore'
 import { AuditLogPage } from './AuditLogPage'
@@ -46,7 +47,9 @@ function requests(fetchMock: ReturnType<typeof stubApi>) {
 function renderPage() {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <AuditLogPage />
+      <MemoryRouter>
+        <AuditLogPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -140,5 +143,81 @@ describe('AuditLogPage', () => {
     expect(container.querySelector('img')).toBeNull()
     expect(container.querySelector('b')).toBeNull()
     expect(container.querySelector('code')!.textContent).toContain('<img src=x onerror=alert(1)>')
+  })
+
+  describe('Target column', () => {
+    const ACCOUNT_ID = '3f2c9a1e-5b7d-4c8e-9a10-2b3c4d5e6f70'
+    const USER_ID = '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d'
+
+    it('shows the entity type and the first 8 characters of the id', async () => {
+      stubApi(() =>
+        json({
+          items: [entry(1, { entity_type: 'user', entity_id: USER_ID, action: 'user.invited' })],
+          total: 1,
+          page: 1,
+          page_size: 25,
+        }),
+      )
+      renderPage()
+      await screen.findByText('Actor 1')
+      expect(screen.getByRole('columnheader', { name: 'Target' })).toBeInTheDocument()
+      const row = screen.getAllByRole('row')[1]
+      expect(row).toHaveTextContent('user 7a1b2c3d')
+      expect(row).not.toHaveTextContent(USER_ID)
+    })
+
+    it('links an account entry to the account', async () => {
+      stubApi(() =>
+        json({
+          items: [entry(1, { entity_type: 'account', entity_id: ACCOUNT_ID })],
+          total: 1,
+          page: 1,
+          page_size: 25,
+        }),
+      )
+      renderPage()
+      const link = await screen.findByRole('link', { name: 'account 3f2c9a1e' })
+      expect(link).toHaveAttribute('href', `/accounts/${ACCOUNT_ID}`)
+    })
+
+    it('does not link an account entry whose id is not UUID-shaped', async () => {
+      stubApi(() =>
+        json({
+          items: [entry(1, { entity_type: 'account', entity_id: '../admin/users?x=1' })],
+          total: 1,
+          page: 1,
+          page_size: 25,
+        }),
+      )
+      renderPage()
+      await screen.findByText('Actor 1')
+      expect(screen.queryByRole('link')).not.toBeInTheDocument()
+      expect(screen.getAllByRole('row')[1]).toHaveTextContent('account ../admin')
+    })
+
+    it('does not link a user entry', async () => {
+      stubApi(() =>
+        json({
+          items: [entry(1, { entity_type: 'user', entity_id: USER_ID })],
+          total: 1,
+          page: 1,
+          page_size: 25,
+        }),
+      )
+      renderPage()
+      await screen.findByText('Actor 1')
+      expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    })
+  })
+
+  it('shows long details in full, wrapped, as text', async () => {
+    const details = { note: 'x'.repeat(400), nested: { list: Array.from({ length: 20 }, (_, i) => `item-${i}`) } }
+    stubApi(() => json({ items: [entry(1, { details })], total: 1, page: 1, page_size: 25 }))
+    const { container } = renderPage()
+    await screen.findByText('Actor 1')
+    const code = container.querySelector('code')!
+    expect(code.textContent).toBe(JSON.stringify(details))
+    expect(code).toHaveClass('whitespace-pre-wrap', 'break-all')
+    expect(code).not.toHaveClass('truncate')
   })
 })

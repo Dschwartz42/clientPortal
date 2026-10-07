@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAccounts } from '../api/hooks'
 import { RoleGate } from '../auth/RoleGate'
 import { Button } from '../components/Button'
@@ -14,7 +14,17 @@ import { AccountFormModal } from './AccountFormModal'
 const PAGE_SIZE = 25
 
 const columns: Column<Account>[] = [
-  { key: 'name', header: 'Name', sortable: true },
+  {
+    key: 'name',
+    header: 'Name',
+    sortable: true,
+    // A real link, so the account can be opened in a new tab; the row click is a convenience.
+    render: (row) => (
+      <Link to={`/accounts/${row.id}`} className="font-medium underline">
+        {row.name}
+      </Link>
+    ),
+  },
   { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
   { key: 'tier', header: 'Tier' },
   {

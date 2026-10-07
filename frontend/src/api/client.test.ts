@@ -67,6 +67,19 @@ describe('apiFetch', () => {
     await expect(apiFetch('/api/accounts/1', { method: 'DELETE' })).resolves.toBeUndefined()
   })
 
+  it('throws invalid_response for a 200 whose body is not JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('<html>proxy error</html>', { status: 200 })),
+    )
+    await expect(apiFetch('/api/accounts')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 200,
+      code: 'invalid_response',
+      message: 'The server sent a response the app could not read.',
+    })
+  })
+
   it('does not clear a newer token when a 401 arrives for an older session', async () => {
     setToken('old')
     let resolve!: (r: Response) => void

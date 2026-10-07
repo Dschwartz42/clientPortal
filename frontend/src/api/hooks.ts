@@ -63,12 +63,13 @@ export function useTimeseries(
   metric: 'net_revenue' | 'new_accounts',
   interval: 'week' | 'month',
   from: string,
+  to?: string,
 ) {
   return useQuery({
-    queryKey: ['analytics', 'timeseries', metric, interval, from],
+    queryKey: ['analytics', 'timeseries', metric, interval, from, to],
     queryFn: () =>
       apiFetch<TimeseriesPoint[]>('/api/analytics/timeseries', {
-        params: { metric, interval, from },
+        params: { metric, interval, from, to },
       }),
   })
 }

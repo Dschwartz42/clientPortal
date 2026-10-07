@@ -62,7 +62,11 @@ export async function apiFetch<T>(path: string, options: Options = {}): Promise<
   if (response.status === 401 && sentWith !== null && getToken() === sentWith) setToken(null)
   if (response.status === 204) return undefined as T
 
-  const data = await response.json().catch(() => null)
+  const data = await response.json().catch(() => undefined)
+  if (response.ok && data === undefined) {
+    // A 2xx that is not JSON (an HTML page from a proxy, say) is not a result to hand to callers.
+    throw new ApiError(response.status, 'invalid_response', 'The server sent a response the app could not read.')
+  }
   if (!response.ok) {
     throw new ApiError(
       response.status,

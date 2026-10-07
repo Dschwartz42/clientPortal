@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuditLog } from '../api/hooks'
 import { type Column, DataTable } from '../components/DataTable'
 import { ErrorState } from '../components/ErrorState'
 import { inputClass } from '../components/styles'
 import { formatDateTime } from '../lib/format'
+import { isUuid } from '../lib/uuid'
 import type { AuditEntry } from '../types/api'
 
 const ACTIONS = [
@@ -21,10 +23,25 @@ const columns: Column<AuditEntry>[] = [
   { key: 'actor_name', header: 'Who', render: (row) => row.actor_name ?? 'Unknown user' },
   { key: 'action', header: 'Action' },
   {
+    key: 'target',
+    header: 'Target',
+    render: (row) => {
+      const label = `${row.entity_type} ${row.entity_id.slice(0, 8)}`
+      // Only a server-shaped id may reach a router path.
+      return row.entity_type === 'account' && isUuid(row.entity_id) ? (
+        <Link to={`/accounts/${row.entity_id}`} className="font-medium underline">
+          {label}
+        </Link>
+      ) : (
+        <span>{label}</span>
+      )
+    },
+  },
+  {
     key: 'details',
     header: 'Details',
     render: (row) => (
-      <code className="block max-w-md truncate text-xs text-slate-600">
+      <code className="block max-w-md whitespace-pre-wrap break-all text-xs text-slate-600">
         {JSON.stringify(row.details)}
       </code>
     ),

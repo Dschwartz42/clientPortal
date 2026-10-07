@@ -170,7 +170,7 @@ describe('DashboardPage', () => {
     expect(fetchMock).toHaveBeenCalled()
   })
 
-  it('asks for the series from the first day of the month eleven months ago', async () => {
+  it('asks for the twelve most recent complete UTC months', async () => {
     // Only Date is faked, so timers and promises keep running normally.
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-03-15T12:00:00Z'))
@@ -185,23 +185,57 @@ describe('DashboardPage', () => {
       'new_accounts',
     ])
     for (const url of series) {
-      expect(url.searchParams.get('from')).toBe('2025-04-01')
+      expect(url.searchParams.get('from')).toBe('2025-03-01')
+      expect(url.searchParams.get('to')).toBe('2026-02-28')
       expect(url.searchParams.get('interval')).toBe('month')
     }
   })
 
   it('uses UTC months when the local date is still in the previous month', async () => {
     // 2026-03-01T00:30Z is still 28 February in Los Angeles; a local-time calculation
-    // would give 2025-03-01 instead of 2025-04-01.
+    // would end at 2026-01-31 and start at 2025-02-01 instead.
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-03-01T00:30:00Z'))
     const fetchMock = stubApi()
     renderDashboard()
     await screen.findByText('$12,345.50')
-    const froms = fetchMock.mock.calls
+    const ranges = fetchMock.mock.calls
       .map(([input]) => new URL(String(input)))
       .filter((url) => url.pathname === '/api/analytics/timeseries')
-      .map((url) => url.searchParams.get('from'))
-    expect(froms).toEqual(['2025-04-01', '2025-04-01'])
+      .map((url) => [url.searchParams.get('from'), url.searchParams.get('to')])
+    expect(ranges).toEqual([
+      ['2025-03-01', '2026-02-28'],
+      ['2025-03-01', '2026-02-28'],
+    ])
+  })
+
+  it('handles a leap-year February and a January start', async () => {
+    for (const [now, from, to] of [
+      ['2024-03-10T00:00:00Z', '2023-03-01', '2024-02-29'],
+      ['2026-01-05T00:00:00Z', '2025-01-01', '2025-12-31'],
+    ]) {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(now))
+      const fetchMock = stubApi()
+      const { unmount } = renderDashboard()
+      await screen.findByText('$12,345.50')
+      const ranges = fetchMock.mock.calls
+        .map(([input]) => new URL(String(input)))
+        .filter((url) => url.pathname === '/api/analytics/timeseries')
+        .map((url) => [url.searchParams.get('from'), url.searchParams.get('to')])
+      expect(ranges).toEqual([
+        [from, to],
+        [from, to],
+      ])
+      unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('titles the charts as covering the last 12 full months', async () => {
+    stubApi()
+    renderDashboard()
+    expect(await screen.findByText('Net revenue, last 12 full months')).toBeInTheDocument()
+    expect(screen.getByText('New accounts, last 12 full months')).toBeInTheDocument()
   })
 })

@@ -11,16 +11,9 @@ import { ErrorState } from '../components/ErrorState'
 import { MetricCard } from '../components/MetricCard'
 import { Panel } from '../components/Panel'
 import { TrendChart } from '../components/TrendChart'
+import { lastFullMonthsRange } from '../lib/dateRange'
 import { formatValue } from '../lib/format'
 import type { TopAccount } from '../types/api'
-
-/** First day of the month 11 months ago: twelve monthly points including this month. */
-function twelveMonthsFrom(): string {
-  const now = new Date()
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1))
-    .toISOString()
-    .slice(0, 10)
-}
 
 const topColumns: Column<TopAccount>[] = [
   {
@@ -41,12 +34,12 @@ const topColumns: Column<TopAccount>[] = [
 ]
 
 export function DashboardPage() {
-  const [from] = useState(twelveMonthsFrom)
+  const [{ from, to }] = useState(() => lastFullMonthsRange(new Date()))
   const summary = useAnalyticsSummary()
   // The summary has no per-tier count; the list endpoint's total gives it without new API.
   const gold = useAccounts({ tier: 'gold', status: 'active', page_size: 1 })
-  const revenue = useTimeseries('net_revenue', 'month', from)
-  const newAccounts = useTimeseries('new_accounts', 'month', from)
+  const revenue = useTimeseries('net_revenue', 'month', from, to)
+  const newAccounts = useTimeseries('new_accounts', 'month', from, to)
   const top = useTopAccounts()
   // After a failed request no number is known; '' renders as a dash, never as 0.
   const s = summary.isError ? undefined : summary.data
@@ -91,13 +84,13 @@ export function DashboardPage() {
         />
       </div>
 
-      <Panel title="Net revenue, last 12 months" query={revenue}>
-        {(data) => <TrendChart data={data} type="line" format="currency" />}
+      <Panel title="Net revenue, last 12 full months" query={revenue}>
+        {(data) => <TrendChart data={data} type="line" format="currency" label="Net revenue" />}
       </Panel>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Panel title="New accounts per month" query={newAccounts}>
-          {(data) => <TrendChart data={data} type="bar" />}
+        <Panel title="New accounts, last 12 full months" query={newAccounts}>
+          {(data) => <TrendChart data={data} type="bar" label="New accounts" />}
         </Panel>
         <Panel title="Top 5 accounts" query={top} isEmpty={(data) => data.length === 0}>
           {(data) => (

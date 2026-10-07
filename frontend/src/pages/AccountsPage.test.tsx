@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -53,8 +54,14 @@ function lastRequest(fetchMock: ReturnType<typeof stubApi>) {
   return listCalls(fetchMock).at(-1)!
 }
 
+/** Every location the router has been at, in order (one entry per navigation). */
+const visited: string[] = []
+
 function Where() {
   const location = useLocation()
+  useEffect(() => {
+    visited.push(location.pathname + location.search)
+  }, [location])
   return <div data-testid="where">{location.pathname + location.search}</div>
 }
 
@@ -101,10 +108,25 @@ function renderPage(path = '/accounts', role: Role = 'member') {
 const where = () => screen.getByTestId('where').textContent ?? ''
 const query = () => new URLSearchParams(where().split('?')[1] ?? '')
 
-beforeEach(() => setToken('test-token'))
+beforeEach(() => {
+  visited.length = 0
+  setToken('test-token')
+})
 afterEach(() => setToken(null))
 
 describe('AccountsPage', () => {
+  it('renders the name as a link to the account and navigates exactly once when it is clicked', async () => {
+    stubApi()
+    renderPage()
+    const link = await screen.findByRole('link', { name: 'Account 1' })
+    expect(link).toHaveAttribute('href', '/accounts/acc-1')
+    expect(screen.getByRole('link', { name: 'Account 2' })).toHaveAttribute('href', '/accounts/acc-2')
+    expect(visited).toEqual(['/accounts'])
+    await userEvent.click(link)
+    expect(await screen.findByRole('heading', { name: 'Detail page' })).toBeInTheDocument()
+    expect(visited).toEqual(['/accounts', '/accounts/acc-1'])
+  })
+
   it('renders the rows with formatted money and dates', async () => {
     stubApi()
     renderPage()

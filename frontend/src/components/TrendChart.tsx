@@ -16,9 +16,11 @@ interface Props {
   data: { period: string; value: string | number }[]
   type?: 'line' | 'bar'
   format?: Format
+  /** Series name shown in the tooltip. */
+  label?: string
 }
 
-export function TrendChart({ data, type = 'line', format = 'number' }: Props) {
+export function TrendChart({ data, type = 'line', format = 'number', label = 'Value' }: Props) {
   // Money arrives as strings; convert once here, for plotting only.
   const points = data.map((point) => ({
     period: formatPeriod(point.period),
@@ -39,12 +41,12 @@ export function TrendChart({ data, type = 'line', format = 'number' }: Props) {
         {type === 'line' ? (
           <LineChart data={points}>
             {axes}
-            <Line type="monotone" dataKey="value" stroke="#0f172a" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="value" stroke="#0f172a" strokeWidth={2} dot={false} name={label} />
           </LineChart>
         ) : (
           <BarChart data={points}>
             {axes}
-            <Bar dataKey="value" fill="#475569" />
+            <Bar dataKey="value" fill="#475569" name={label} />
           </BarChart>
         )}
       </ResponsiveContainer>
