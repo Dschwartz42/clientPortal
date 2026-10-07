@@ -88,6 +88,7 @@ function renderPage(role: Role = 'member', path = `/accounts/${ID}`) {
     loading: false,
     login: vi.fn(),
     logout: vi.fn(),
+    refreshUser: async () => {},
   }
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>

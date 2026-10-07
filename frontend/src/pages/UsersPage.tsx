@@ -87,10 +87,22 @@ function InviteModal({ onClose }: { onClose: () => void }) {
 }
 
 export function UsersPage() {
-  const { user: me } = useAuth()
+  const { user: me, refreshUser } = useAuth()
   const users = useUsers()
   const update = useUpdateUser()
   const [inviting, setInviting] = useState(false)
+
+  // Changing your own role or status can change what you may do; re-read the session user.
+  function change(id: string, body: { role?: Role; is_active?: boolean }) {
+    update.mutate(
+      { id, body },
+      {
+        onSuccess: () => {
+          if (id === me?.id) void refreshUser()
+        },
+      },
+    )
+  }
 
   const columns: Column<User>[] = [
     { key: 'full_name', header: 'Name' },
@@ -104,7 +116,7 @@ export function UsersPage() {
           aria-label={`Role for ${row.full_name}`}
           value={row.role}
           disabled={update.isPending}
-          onChange={(e) => update.mutate({ id: row.id, body: { role: e.target.value as Role } })}
+          onChange={(e) => change(row.id, { role: e.target.value as Role })}
         >
           <option value="admin">Admin</option>
           <option value="member">Member</option>
@@ -121,7 +133,7 @@ export function UsersPage() {
             <Button
               variant="secondary"
               disabled={update.isPending}
-              onClick={() => update.mutate({ id: row.id, body: { is_active: !row.is_active } })}
+              onClick={() => change(row.id, { is_active: !row.is_active })}
             >
               {row.is_active ? 'Deactivate' : 'Reactivate'}
             </Button>

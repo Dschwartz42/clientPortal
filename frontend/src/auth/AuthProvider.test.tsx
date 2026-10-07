@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { type AuthState, useAuth } from './AuthContext'
 import { AuthProvider } from './AuthProvider'
@@ -143,5 +143,73 @@ describe('AuthProvider', () => {
     queryClient.setQueryData(['accounts'], { items: [] })
     await act(() => authRef.login('b@acme.test', 'pw'))
     expect(queryClient.getQueryData(['accounts'])).toBeUndefined()
+  })
+})
+
+describe('refreshUser', () => {
+  it('updates the role from /api/auth/me', async () => {
+    setToken('tok')
+    const bodies = [me, { ...me, role: 'member' }]
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(bodies.shift()), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    function Role() {
+      const { user } = useAuth()
+      return <p data-testid="role">{user?.role ?? 'none'}</p>
+    }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AuthProvider>
+          <Probe />
+          <Role />
+        </AuthProvider>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(screen.getByTestId('role')).toHaveTextContent('admin'))
+    await act(() => latest.auth!.refreshUser())
+    expect(screen.getByTestId('role')).toHaveTextContent('member')
+    expect(getToken()).toBe('tok')
+  })
+
+  it('ignores a /me answer that arrives after the token changed', async () => {
+    const pending: Array<(r: Response) => void> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: URL | RequestInfo) =>
+        String(input).includes('/api/auth/login')
+          ? Promise.resolve(new Response(JSON.stringify({ access_token: 'tokB', user: userB }), { status: 200 }))
+          : new Promise<Response>((resolve) => pending.push(resolve)),
+      ),
+    )
+    setToken('tokA')
+    renderProvider()
+    await act(() => authRef.login('b@acme.test', 'pw'))
+    let refreshed: Promise<void> = Promise.resolve()
+    act(() => {
+      refreshed = latest.auth!.refreshUser()
+    })
+    // pending[0] is the stale mount check, pending[1] the refresh made with tokB.
+    expect(pending).toHaveLength(2)
+    act(() => setToken('tokC'))
+    await act(async () => {
+      pending[1](new Response(JSON.stringify(me), { status: 200 }))
+      await refreshed
+    })
+    expect(screen.getByTestId('probe')).not.toHaveTextContent('admin@acme.test')
+  })
+
+  it('keeps the session and the user when /me fails with a non-401 error', async () => {
+    setToken('tok')
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(me), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 'server_error', message: 'boom' } }), { status: 500 }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    renderProvider()
+    expect(await screen.findByText('admin@acme.test')).toBeInTheDocument()
+    await act(() => latest.auth!.refreshUser())
+    expect(screen.getByTestId('probe')).toHaveTextContent('admin@acme.test')
+    expect(getToken()).toBe('tok')
   })
 })

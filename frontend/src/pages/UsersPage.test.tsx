@@ -72,6 +72,7 @@ function renderPage() {
     loading: false,
     login: vi.fn(),
     logout: vi.fn(),
+    refreshUser: async () => {},
   }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return {

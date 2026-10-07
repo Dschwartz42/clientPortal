@@ -22,6 +22,7 @@ describe('AppShell', () => {
           loading: false,
           login: vi.fn(),
           logout,
+          refreshUser: async () => {},
         }}
       >
         <MemoryRouter>

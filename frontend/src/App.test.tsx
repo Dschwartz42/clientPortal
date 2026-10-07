@@ -28,6 +28,7 @@ function renderApp(path: string, auth: Partial<AuthState>) {
     loading: false,
     login: vi.fn(),
     logout: vi.fn(),
+    refreshUser: async () => {},
     ...auth,
   }
   return render(

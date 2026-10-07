@@ -8,7 +8,7 @@ function renderAs(role: Role | null) {
   const user: Me | null = role && {
     id: '1', email: 'x@acme.test', full_name: 'X', role, org_id: 'o', org_name: 'Acme',
   }
-  const value = { user, loading: false, login: async () => {}, logout: () => {} }
+  const value = { user, loading: false, login: async () => {}, logout: () => {}, refreshUser: async () => {} }
   return render(
     <AuthContext.Provider value={value}>
       <RoleGate role="admin">
