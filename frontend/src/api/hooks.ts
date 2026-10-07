@@ -138,7 +138,12 @@ export function useInviteUser() {
   const invalidate = useInvalidateUsers()
   return useMutation<InvitedUser, Error, InviteInput>({
     mutationFn: (body) => apiFetch<InvitedUser>('/api/users', { method: 'POST', body }),
-    onSuccess: invalidate,
+    // Do not wait for the refetches: the temporary password must appear as soon as the API answers.
+    onSuccess: () => {
+      void invalidate()
+    },
+    // The result holds the temporary password; drop it once the modal's observer is gone.
+    gcTime: 0,
   })
 }
 

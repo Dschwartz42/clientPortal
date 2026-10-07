@@ -73,16 +73,36 @@ function renderPage() {
     login: vi.fn(),
     logout: vi.fn(),
   }
-  return render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <AuthContext.Provider value={value}>
-        <MemoryRouter>
-          <UsersPage />
-        </MemoryRouter>
-      </AuthContext.Provider>
-    </QueryClientProvider>,
-  )
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <AuthContext.Provider value={value}>
+          <MemoryRouter>
+            <UsersPage />
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>,
+    ),
+  }
 }
+
+const INVITED = {
+  ...user('u9', { full_name: 'New Person', email: 'new@acme.test' }),
+  temporary_password: 'Sup3r-Secret-pw',
+}
+
+async function submitInvite() {
+  await userEvent.click(screen.getByRole('button', { name: 'Invite user' }))
+  const dialog = screen.getByRole('dialog', { name: 'Invite user' })
+  await userEvent.type(within(dialog).getByLabelText('Full name'), 'New Person')
+  await userEvent.type(within(dialog).getByLabelText('Email'), 'new@acme.test')
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Invite' }))
+  return dialog
+}
+
+const backdropOf = (dialog: HTMLElement) => dialog.parentElement as HTMLElement
 
 function rowOf(name: string) {
   return screen.getByRole('row', { name: new RegExp(name) })
@@ -189,7 +209,7 @@ describe('UsersPage', () => {
     const fetchMock = stubApi({
       write: () => json({ ...user('u9', { full_name: 'New Person', email: 'new@acme.test' }), temporary_password: 'Sup3r-Secret-pw' }, 201),
     })
-    renderPage()
+    const { queryClient } = renderPage()
     await screen.findByText('Name u2')
     await userEvent.click(screen.getByRole('button', { name: 'Invite user' }))
     const dialog = screen.getByRole('dialog', { name: 'Invite user' })
@@ -211,6 +231,52 @@ describe('UsersPage', () => {
     expect(window.location.href).not.toContain('Sup3r')
     expect(JSON.stringify({ ...window.localStorage })).not.toContain('Sup3r')
     expect(JSON.stringify({ ...window.sessionStorage })).not.toContain('Sup3r')
+    // The mutation cache must not keep the password once the modal's observer is gone.
+    await waitFor(() =>
+      expect(
+        JSON.stringify(queryClient.getMutationCache().getAll().map((m) => m.state)),
+      ).not.toContain('Sup3r'),
+    )
+  })
+
+  it('keeps the "User invited" view open on Escape and backdrop clicks until Done', async () => {
+    stubApi({ write: () => json(INVITED, 201) })
+    renderPage()
+    await screen.findByText('Name u2')
+    await submitInvite()
+    const done = await screen.findByRole('dialog', { name: 'User invited' })
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(backdropOf(done))
+    expect(screen.getByRole('dialog', { name: 'User invited' })).toBeInTheDocument()
+    expect(screen.getByText('Sup3r-Secret-pw')).toBeInTheDocument()
+    await userEvent.click(within(done).getByRole('button', { name: 'Done' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('moves focus into the dialog when the invite form is replaced by the password view', async () => {
+    stubApi({ write: () => json(INVITED, 201) })
+    renderPage()
+    await screen.findByText('Name u2')
+    await submitInvite()
+    const done = await screen.findByRole('dialog', { name: 'User invited' })
+    expect(done).toContainElement(document.activeElement as HTMLElement)
+  })
+
+  it('cannot be closed while the invitation is in flight, and still shows the password after', async () => {
+    let release: (response: Response) => void = () => {}
+    stubApi({ write: () => new Promise<Response>((resolve) => (release = resolve)) })
+    renderPage()
+    await screen.findByText('Name u2')
+    const dialog = await submitInvite()
+    expect(await within(dialog).findByRole('button', { name: 'Inviting…' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(backdropOf(dialog))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByRole('dialog', { name: 'Invite user' })).toBeInTheDocument()
+    release(json(INVITED, 201))
+    const done = await screen.findByRole('dialog', { name: 'User invited' })
+    expect(within(done).getByText('Sup3r-Secret-pw')).toBeInTheDocument()
   })
 
   it('keeps the invite modal open with the typed values when the email is taken', async () => {

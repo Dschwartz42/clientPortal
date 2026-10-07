@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -93,5 +93,72 @@ describe('Modal', () => {
       </Modal>,
     )
     expect(screen.getByLabelText('field')).toHaveFocus()
+  })
+
+  it('does not close when a drag starts inside the dialog and is released on the backdrop', () => {
+    const onClose = vi.fn()
+    render(
+      <Modal title="Edit" open onClose={onClose}>
+        <p>inside</p>
+      </Modal>,
+    )
+    const backdrop = screen.getByRole('dialog').parentElement as HTMLElement
+    fireEvent.mouseDown(screen.getByText('inside'))
+    fireEvent.mouseUp(backdrop)
+    fireEvent.click(backdrop)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('closes when both mousedown and mouseup happen on the backdrop', () => {
+    const onClose = vi.fn()
+    render(
+      <Modal title="Edit" open onClose={onClose}>
+        <p>inside</p>
+      </Modal>,
+    )
+    const backdrop = screen.getByRole('dialog').parentElement as HTMLElement
+    fireEvent.mouseDown(backdrop)
+    fireEvent.mouseUp(backdrop)
+    fireEvent.click(backdrop)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not close on a mouseup that had no mousedown on the backdrop', () => {
+    const onClose = vi.fn()
+    render(
+      <Modal title="Edit" open onClose={onClose}>
+        <p>inside</p>
+      </Modal>,
+    )
+    const backdrop = screen.getByRole('dialog').parentElement as HTMLElement
+    fireEvent.mouseUp(backdrop)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('ignores Escape and the backdrop when dismissible is false', async () => {
+    const onClose = vi.fn()
+    render(
+      <Modal title="Edit" open dismissible={false} onClose={onClose}>
+        <p>inside</p>
+      </Modal>,
+    )
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('dialog').parentElement as HTMLElement)
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('moves focus to the dialog when the title changes', async () => {
+    function Host({ title }: { title: string }) {
+      return (
+        <Modal title={title} open onClose={vi.fn()}>
+          <button>first</button>
+        </Modal>
+      )
+    }
+    const { rerender } = render(<Host title="One" />)
+    screen.getByRole('button', { name: 'first' }).focus()
+    rerender(<Host title="Two" />)
+    expect(screen.getByRole('dialog', { name: 'Two' })).toHaveFocus()
   })
 })

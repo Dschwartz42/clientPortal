@@ -23,7 +23,8 @@ function InviteModal({ onClose }: { onClose: () => void }) {
 
   if (invited) {
     return (
-      <Modal title="User invited" open onClose={onClose}>
+      // Only Done closes this view: the password is shown once and can never be recovered.
+      <Modal title="User invited" open dismissible={false} onClose={onClose}>
         <p className="text-sm text-slate-600">
           Give {invited.full_name} this temporary password. It is shown only once.
         </p>
@@ -38,7 +39,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Invite user" open onClose={onClose}>
+    <Modal title="Invite user" open dismissible={!invite.isPending} onClose={onClose}>
       <form onSubmit={onSubmit} className="space-y-4">
         {invite.isError && (
           <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
@@ -73,7 +74,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
           </select>
         </FormField>
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" disabled={invite.isPending} onClick={onClose}>
             Cancel
           </Button>
           <Button type="submit" disabled={invite.isPending}>
