@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -30,7 +30,7 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status })
 }
 
-function stubApi(overrides: { summary?: () => Response } = {}) {
+function stubApi(overrides: { summary?: () => Response; accounts?: () => Response } = {}) {
   const fetchMock = vi.fn(async (input: URL | string) => {
     const url = new URL(String(input))
     switch (url.pathname) {
@@ -45,13 +45,22 @@ function stubApi(overrides: { summary?: () => Response } = {}) {
       case '/api/analytics/top-accounts':
         return json(top)
       case '/api/accounts':
-        return json({ items: [], total: 7, page: 1, page_size: 1 })
+        return overrides.accounts
+          ? overrides.accounts()
+          : json({ items: [], total: 7, page: 1, page_size: 1 })
       default:
         return json({ error: { code: 'not_found', message: 'nope' } }, 404)
     }
   })
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
+}
+
+/** The card element that holds a metric's label and value. */
+function card(label: string): HTMLElement {
+  const element = screen.getByText(label).parentElement
+  if (!element) throw new Error(`No card for ${label}`)
+  return element
 }
 
 function renderDashboard() {
@@ -77,7 +86,7 @@ describe('DashboardPage', () => {
     expect(await screen.findByText('$12,345.50')).toBeInTheDocument()
     expect(screen.getByText('$9,000.00')).toBeInTheDocument()
     expect(screen.getByText('42')).toBeInTheDocument()
-    expect(screen.getByText('Active gold accounts').nextElementSibling).toHaveTextContent('7')
+    await waitFor(() => expect(within(card('Active gold accounts')).getByText('7')).toBeInTheDocument())
     expect(screen.getByText(/12\.5%/)).toBeInTheDocument()
   })
 
@@ -114,6 +123,53 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('Summary exploded')).not.toBeInTheDocument()
   })
 
+  it('shows a dash, not zeros, in the summary cards when the summary fails', async () => {
+    stubApi({ summary: () => json({ error: { code: 'server_error', message: 'Summary exploded' } }, 500) })
+    renderDashboard()
+    expect(await screen.findByText('Summary exploded')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    for (const label of ['Active accounts', 'Total monthly value', 'Net revenue (30 days)']) {
+      expect(card(label)).toHaveTextContent(`${label}—`)
+    }
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument()
+  })
+
+  it('shows a dash and a retry for the gold card when only its request fails', async () => {
+    const fetchMock = stubApi({
+      accounts: () => json({ error: { code: 'server_error', message: 'Gold exploded' } }, 500),
+    })
+    renderDashboard()
+    expect(await screen.findByText(/Gold exploded/)).toBeInTheDocument()
+    expect(within(card('Active gold accounts')).getByText('—')).toBeInTheDocument()
+    expect(card('Active gold accounts')).toHaveTextContent('Active gold accounts—')
+    expect(within(card('Active accounts')).getByText('42')).toBeInTheDocument()
+    expect(within(card('Total monthly value')).getByText('$12,345.50')).toBeInTheDocument()
+    expect(within(card('Net revenue (30 days)')).getByText('$9,000.00')).toBeInTheDocument()
+
+    const accountCalls = () =>
+      fetchMock.mock.calls.filter(([input]) => new URL(String(input)).pathname === '/api/accounts')
+        .length
+    const before = accountCalls()
+    const alert = screen.getByText(/Gold exploded/).closest('[role="alert"]')
+    if (!(alert instanceof HTMLElement)) throw new Error('no alert')
+    await userEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(accountCalls()).toBe(before + 1))
+  })
+
+  it('retries the summary request from its own error state', async () => {
+    let calls = 0
+    const fetchMock = stubApi({
+      summary: () => {
+        calls += 1
+        return json({ error: { code: 'server_error', message: 'Summary exploded' } }, 500)
+      },
+    })
+    renderDashboard()
+    await userEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(calls).toBe(2))
+    expect(fetchMock).toHaveBeenCalled()
+  })
+
   it('asks for the series from the first day of the month eleven months ago', async () => {
     // Only Date is faked, so timers and promises keep running normally.
     vi.useFakeTimers({ toFake: ['Date'] })
@@ -132,5 +188,20 @@ describe('DashboardPage', () => {
       expect(url.searchParams.get('from')).toBe('2025-04-01')
       expect(url.searchParams.get('interval')).toBe('month')
     }
+  })
+
+  it('uses UTC months when the local date is still in the previous month', async () => {
+    // 2026-03-01T00:30Z is still 28 February in Los Angeles; a local-time calculation
+    // would give 2025-03-01 instead of 2025-04-01.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-03-01T00:30:00Z'))
+    const fetchMock = stubApi()
+    renderDashboard()
+    await screen.findByText('$12,345.50')
+    const froms = fetchMock.mock.calls
+      .map(([input]) => new URL(String(input)))
+      .filter((url) => url.pathname === '/api/analytics/timeseries')
+      .map((url) => url.searchParams.get('from'))
+    expect(froms).toEqual(['2025-04-01', '2025-04-01'])
   })
 })

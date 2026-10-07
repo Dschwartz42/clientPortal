@@ -48,7 +48,9 @@ export function DashboardPage() {
   const revenue = useTimeseries('net_revenue', 'month', from)
   const newAccounts = useTimeseries('new_accounts', 'month', from)
   const top = useTopAccounts()
-  const s = summary.data
+  // After a failed request no number is known; '' renders as a dash, never as 0.
+  const s = summary.isError ? undefined : summary.data
+  const goldTotal = gold.isError ? undefined : gold.data?.total
 
   return (
     <div className="space-y-6">
@@ -57,28 +59,34 @@ export function DashboardPage() {
       {summary.isError && (
         <ErrorState message={summary.error.message} onRetry={() => summary.refetch()} />
       )}
+      {gold.isError && (
+        <ErrorState
+          message={`Could not load the gold account count: ${gold.error.message}`}
+          onRetry={() => gold.refetch()}
+        />
+      )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Active accounts"
-          value={s?.active_accounts ?? 0}
+          value={s?.active_accounts ?? ''}
           loading={summary.isPending}
         />
         <MetricCard
           label="Total monthly value"
-          value={s?.total_monthly_value ?? '0'}
+          value={s?.total_monthly_value ?? ''}
           format="currency"
           loading={summary.isPending}
         />
         <MetricCard
           label="Net revenue (30 days)"
-          value={s?.net_revenue_30d ?? '0'}
+          value={s?.net_revenue_30d ?? ''}
           change={s?.net_revenue_change_pct}
           format="currency"
           loading={summary.isPending}
         />
         <MetricCard
           label="Active gold accounts"
-          value={gold.data?.total ?? 0}
+          value={goldTotal ?? ''}
           loading={gold.isPending}
         />
       </div>
