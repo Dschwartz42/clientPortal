@@ -9,6 +9,7 @@ import { ErrorState } from '../components/ErrorState'
 import { LoadingSkeleton } from '../components/LoadingSkeleton'
 import { Modal } from '../components/Modal'
 import { StatusBadge } from '../components/StatusBadge'
+import { isUuid } from '../lib/uuid'
 import { formatDate, formatDateTime, formatValue } from '../lib/format'
 import type { Transaction } from '../types/api'
 import { AccountFormModal } from './AccountFormModal'
@@ -38,12 +39,29 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 export function AccountDetailPage() {
   const { id = '' } = useParams()
+  // The route param is decoded by the router, so it can hold anything. Only a UUID can be an
+  // account id; everything else is not found, with no request made. Keyed by id so paging and
+  // dialog state start fresh for each account.
+  if (!isUuid(id)) return <NotFoundPage />
+  return <AccountDetail key={id} id={id} />
+}
+
+function AccountDetail({ id }: { id: string }) {
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState(false)
   const [confirmingClose, setConfirmingClose] = useState(false)
   const account = useAccount(id)
   const transactions = useAccountTransactions(id, page)
   const update = useUpdateAccount(id)
+
+  function openClose() {
+    update.reset()
+    setConfirmingClose(true)
+  }
+  function cancelClose() {
+    update.reset()
+    setConfirmingClose(false)
+  }
 
   if (account.isPending) return <LoadingSkeleton rows={8} />
   // Another tenant's account and a non-existent one look identical: both are 404.
@@ -72,7 +90,7 @@ export function AccountDetailPage() {
               Edit
             </Button>
             {a.status !== 'closed' && (
-              <Button variant="danger" onClick={() => setConfirmingClose(true)}>
+              <Button variant="danger" onClick={openClose}>
                 Close account
               </Button>
             )}
@@ -122,7 +140,7 @@ export function AccountDetailPage() {
       <Modal
         title="Close this account?"
         open={confirmingClose}
-        onClose={() => setConfirmingClose(false)}
+        onClose={cancelClose}
       >
         <p className="text-sm text-slate-600">
           {a.name} will be marked closed as of today. Its transactions are kept.
@@ -133,7 +151,7 @@ export function AccountDetailPage() {
           </p>
         )}
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setConfirmingClose(false)}>
+          <Button variant="secondary" onClick={cancelClose}>
             Cancel
           </Button>
           <Button

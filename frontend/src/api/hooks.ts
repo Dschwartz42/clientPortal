@@ -35,7 +35,7 @@ export function useAccounts(params: AccountListParams) {
 export function useAccount(id: string) {
   return useQuery({
     queryKey: ['account', id],
-    queryFn: () => apiFetch<AccountDetail>(`/api/accounts/${id}`),
+    queryFn: () => apiFetch<AccountDetail>(`/api/accounts/${encodeURIComponent(id)}`),
     enabled: Boolean(id),
   })
 }
@@ -44,7 +44,7 @@ export function useAccountTransactions(id: string, page: number) {
   return useQuery({
     queryKey: ['account', id, 'transactions', page],
     queryFn: () =>
-      apiFetch<Paginated<Transaction>>(`/api/accounts/${id}/transactions`, {
+      apiFetch<Paginated<Transaction>>(`/api/accounts/${encodeURIComponent(id)}/transactions`, {
         params: { page, page_size: 10 },
       }),
     placeholderData: keepPreviousData,
@@ -119,7 +119,7 @@ export function useCreateAccount() {
 export function useUpdateAccount(id: string) {
   const invalidate = useInvalidateAccounts()
   return useMutation<Account, Error, AccountInput>({
-    mutationFn: (body) => apiFetch<Account>(`/api/accounts/${id}`, { method: 'PATCH', body }),
+    mutationFn: (body) => apiFetch<Account>(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
     onSuccess: invalidate,
   })
 }
@@ -147,7 +147,7 @@ export type UserUpdateInput = { id: string; body: { role?: Role; is_active?: boo
 export function useUpdateUser() {
   const invalidate = useInvalidateUsers()
   return useMutation<User, Error, UserUpdateInput>({
-    mutationFn: ({ id, body }) => apiFetch<User>(`/api/users/${id}`, { method: 'PATCH', body }),
+    mutationFn: ({ id, body }) => apiFetch<User>(`/api/users/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
     onSuccess: invalidate,
   })
 }

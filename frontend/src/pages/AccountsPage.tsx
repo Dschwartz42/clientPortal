@@ -33,16 +33,32 @@ function parsePage(raw: string | null): number {
   return n >= 1 && n <= 1_000_000 ? n : 1
 }
 
+const STATUSES = ['active', 'paused', 'closed']
+const TIERS = ['bronze', 'silver', 'gold']
+const SORT_FIELDS = ['name', 'monthly_value', 'opened_at', 'created_at', 'status', 'tier']
+const SORTS = [...SORT_FIELDS, ...SORT_FIELDS.map((field) => `-${field}`)]
+const MAX_SEARCH = 100
+
+// Values from the URL are untrusted: anything outside the known set falls back to the default,
+// so the control and the request always show the same value.
+function oneOf(raw: string | null, allowed: string[], fallback: string): string {
+  return raw !== null && allowed.includes(raw) ? raw : fallback
+}
+
+function parseSearch(raw: string | null): string {
+  return (raw ?? '').replaceAll('\0', '').slice(0, MAX_SEARCH)
+}
+
 export function AccountsPage() {
   const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
   // Filters live in the URL, so a filtered view can be bookmarked, shared and refreshed.
   const [params, setParams] = useSearchParams()
   const filters = {
-    search: params.get('search') ?? '',
-    status: params.get('status') ?? '',
-    tier: params.get('tier') ?? '',
-    sort: params.get('sort') ?? 'name',
+    search: parseSearch(params.get('search')),
+    status: oneOf(params.get('status'), STATUSES, ''),
+    tier: oneOf(params.get('tier'), TIERS, ''),
+    sort: oneOf(params.get('sort'), SORTS, 'name'),
     page: parsePage(params.get('page')),
   }
   const query = useAccounts({ ...filters, page_size: PAGE_SIZE })
@@ -73,6 +89,7 @@ export function AccountsPage() {
           type="search"
           placeholder="Search by name"
           aria-label="Search by name"
+          maxLength={MAX_SEARCH}
           value={filters.search}
           onChange={(e) => update({ search: e.target.value })}
         />

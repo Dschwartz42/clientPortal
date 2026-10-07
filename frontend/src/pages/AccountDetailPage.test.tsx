@@ -1,15 +1,18 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthContext, type AuthState } from '../auth/AuthContext'
 import { setToken } from '../auth/tokenStore'
 import type { Role } from '../types/api'
 import { AccountDetailPage } from './AccountDetailPage'
 
+const ID = '3f2c1a9e-5b7d-4c8e-9a10-1b2c3d4e5f60'
+const ID2 = 'aaaaaaaa-1111-4222-8333-444444444444'
+
 const detail = {
-  id: 'acc-1',
+  id: '3f2c1a9e-5b7d-4c8e-9a10-1b2c3d4e5f60',
   name: 'Alpha Co',
   status: 'active',
   tier: 'gold',
@@ -25,7 +28,7 @@ const detail = {
 function tx(n: number, type: 'charge' | 'refund' | 'credit', amount: string) {
   return {
     id: `t${n}`,
-    account_id: 'acc-1',
+    account_id: '3f2c1a9e-5b7d-4c8e-9a10-1b2c3d4e5f60',
     type,
     amount,
     description: `Tx ${n}`,
@@ -46,12 +49,16 @@ interface Opts {
 function stubApi(opts: Opts = {}) {
   const fetchMock = vi.fn(async (input: URL | string, init?: RequestInit) => {
     const url = new URL(String(input))
-    if (url.pathname === '/api/accounts/acc-1' && init?.method === 'PATCH') {
+    if (url.pathname === `/api/accounts/${ID2}`) return json({ ...detail, id: ID2, name: 'Beta Co' })
+    if (url.pathname === `/api/accounts/${ID2}/transactions`) {
+      return json({ items: [], total: 0, page: 1, page_size: 10 })
+    }
+    if (url.pathname === '/api/accounts/3f2c1a9e-5b7d-4c8e-9a10-1b2c3d4e5f60' && init?.method === 'PATCH') {
       const body = JSON.parse(String(init.body))
       return opts.patch ? opts.patch(body) : json({ ...detail, ...body })
     }
-    if (url.pathname === '/api/accounts/acc-1') return opts.account ? opts.account() : json(detail)
-    if (url.pathname === '/api/accounts/acc-1/transactions') {
+    if (url.pathname === '/api/accounts/3f2c1a9e-5b7d-4c8e-9a10-1b2c3d4e5f60') return opts.account ? opts.account() : json(detail)
+    if (url.pathname === '/api/accounts/3f2c1a9e-5b7d-4c8e-9a10-1b2c3d4e5f60/transactions') {
       return opts.transactions
         ? opts.transactions(url)
         : json({
@@ -68,7 +75,7 @@ function stubApi(opts: Opts = {}) {
   return fetchMock
 }
 
-function renderPage(role: Role = 'member') {
+function renderPage(role: Role = 'member', path = `/accounts/${ID}`) {
   const value: AuthState = {
     user: {
       id: 'u1',
@@ -85,7 +92,8 @@ function renderPage(role: Role = 'member') {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <AuthContext.Provider value={value}>
-        <MemoryRouter initialEntries={['/accounts/acc-1']}>
+        <MemoryRouter initialEntries={[path]}>
+          <Link to={`/accounts/${ID2}`}>other-account</Link>
           <Routes>
             <Route path="/accounts/:id" element={<AccountDetailPage />} />
           </Routes>
@@ -182,7 +190,7 @@ describe('AccountDetailPage', () => {
       expect(screen.queryByRole('dialog', { name: 'Close this account?' })).not.toBeInTheDocument(),
     )
     const patch = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')!
-    expect(new URL(String(patch[0])).pathname).toBe('/api/accounts/acc-1')
+    expect(new URL(String(patch[0])).pathname).toBe('/api/accounts/3f2c1a9e-5b7d-4c8e-9a10-1b2c3d4e5f60')
     expect(patch[1]?.body).toBe('{"status":"closed"}')
   })
 
@@ -197,9 +205,53 @@ describe('AccountDetailPage', () => {
     await waitFor(() => {
       const pages = fetchMock.mock.calls
         .map(([input]) => new URL(String(input)))
-        .filter((u) => u.pathname === '/api/accounts/acc-1/transactions')
+        .filter((u) => u.pathname === '/api/accounts/3f2c1a9e-5b7d-4c8e-9a10-1b2c3d4e5f60/transactions')
         .map((u) => u.searchParams.get('page'))
       expect(pages).toEqual(['1', '2'])
     })
+  })
+
+  it.each(['..%2Fusers', 'not-a-uuid', '%2E%2E', 'abc%3Fx%3D1'])(
+    'renders not-found without any request for the id %s',
+    async (bad) => {
+      const fetchMock = stubApi()
+      renderPage('admin', `/accounts/${bad}`)
+      expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('shows a failed close inside the dialog, and not again after Cancel and reopen', async () => {
+    stubApi({
+      patch: () => json({ error: { code: 'server_error', message: 'Close exploded' } }, 500),
+    })
+    renderPage('admin')
+    await userEvent.click(await screen.findByRole('button', { name: 'Close account' }))
+    let dialog = screen.getByRole('dialog', { name: 'Close this account?' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close account' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Close exploded')
+    expect(screen.getByRole('dialog', { name: 'Close this account?' })).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Close account' }))
+    dialog = screen.getByRole('dialog', { name: 'Close this account?' })
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('asks for page 1 of the transactions when moving to another account', async () => {
+    const fetchMock = stubApi({
+      transactions: () =>
+        json({ items: [tx(1, 'charge', '100.00')], total: 25, page: 1, page_size: 10 }),
+    })
+    renderPage()
+    await screen.findByText('Tx 1')
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() => expect(screen.getByText(/Showing 11/)).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('link', { name: 'other-account' }))
+    expect(await screen.findByRole('heading', { name: 'Beta Co' })).toBeInTheDocument()
+    const other = fetchMock.mock.calls
+      .map(([input]) => new URL(String(input)))
+      .filter((u) => u.pathname === `/api/accounts/${ID2}/transactions`)
+    expect(other.length).toBeGreaterThan(0)
+    expect(other.map((u) => u.searchParams.get('page'))).toEqual(other.map(() => '1'))
   })
 })

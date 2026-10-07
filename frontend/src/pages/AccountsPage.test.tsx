@@ -254,4 +254,35 @@ describe('AccountsPage', () => {
     expect(await screen.findByRole('heading', { name: 'Detail page' })).toBeInTheDocument()
     expect(where()).toBe('/accounts/acc-9')
   })
+
+  it('sanitises bogus sort, status and tier from the URL', async () => {
+    const fetchMock = stubApi()
+    renderPage('/accounts?sort=password_hash&status=bogus&tier=platinum')
+    expect(await screen.findByText('Account 1')).toBeInTheDocument()
+    const request = listCalls(fetchMock)[0]
+    expect(request.searchParams.get('sort')).toBe('name')
+    expect(request.searchParams.has('status')).toBe(false)
+    expect(request.searchParams.has('tier')).toBe(false)
+    expect(screen.getByLabelText('Status')).toHaveValue('')
+    expect(screen.getByLabelText('Tier')).toHaveValue('')
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  })
+
+  it('keeps valid descending sorts and rejects a bare dash', async () => {
+    const fetchMock = stubApi()
+    renderPage('/accounts?sort=-opened_at')
+    await screen.findByText('Account 1')
+    expect(listCalls(fetchMock)[0].searchParams.get('sort')).toBe('-opened_at')
+  })
+
+  it('truncates a long search to 100 characters, with NULs removed', async () => {
+    const fetchMock = stubApi()
+    renderPage(`/accounts?search=${'a%00'.repeat(300)}`)
+    await screen.findByText('Account 1')
+    const expected = 'a'.repeat(100)
+    expect(listCalls(fetchMock)[0].searchParams.get('search')).toBe(expected)
+    const input = screen.getByRole('searchbox', { name: 'Search by name' })
+    expect(input).toHaveValue(expected)
+    expect(input).toHaveAttribute('maxlength', '100')
+  })
 })
