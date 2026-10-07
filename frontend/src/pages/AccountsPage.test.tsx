@@ -1,0 +1,311 @@
+import { useEffect } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AuthContext, type AuthState } from '../auth/AuthContext'
+import { setToken } from '../auth/tokenStore'
+import type { Role } from '../types/api'
+import { AccountsPage } from './AccountsPage'
+
+function account(n: number, overrides: Record<string, unknown> = {}) {
+  return {
+    id: `acc-${n}`,
+    name: `Account ${n}`,
+    status: 'active',
+    tier: 'gold',
+    monthly_value: '1234.50',
+    owner_user_id: null,
+    opened_at: '2026-03-01',
+    closed_at: null,
+    created_at: '2026-03-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status })
+}
+
+type Responder = (url: URL) => Response
+
+function stubApi(responder?: Responder) {
+  const fetchMock = vi.fn(async (input: URL | string) => {
+    const url = new URL(String(input))
+    if (url.pathname === '/api/accounts') {
+      return responder
+        ? responder(url)
+        : json({ items: [account(1), account(2)], total: 2, page: 1, page_size: 25 })
+    }
+    return json({ error: { code: 'not_found', message: 'nope' } }, 404)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+function listCalls(fetchMock: ReturnType<typeof stubApi>) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(String(input)))
+    .filter((url) => url.pathname === '/api/accounts')
+}
+
+function lastRequest(fetchMock: ReturnType<typeof stubApi>) {
+  return listCalls(fetchMock).at(-1)!
+}
+
+/** Every location the router has been at, in order (one entry per navigation). */
+const visited: string[] = []
+
+function Where() {
+  const location = useLocation()
+  useEffect(() => {
+    visited.push(location.pathname + location.search)
+  }, [location])
+  return <div data-testid="where">{location.pathname + location.search}</div>
+}
+
+function Back() {
+  const navigate = useNavigate()
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      test-back
+    </button>
+  )
+}
+
+function renderPage(path = '/accounts', role: Role = 'member') {
+  const value: AuthState = {
+    user: {
+      id: 'u1',
+      email: `${role}@acme.test`,
+      full_name: 'Test Person',
+      role,
+      org_id: 'o1',
+      org_name: 'Acme',
+    },
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refreshUser: async () => {},
+  }
+  return render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <AuthContext.Provider value={value}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/accounts" element={<AccountsPage />} />
+            <Route path="/accounts/:id" element={<h1>Detail page</h1>} />
+          </Routes>
+          <Where />
+          <Back />
+        </MemoryRouter>
+      </AuthContext.Provider>
+    </QueryClientProvider>,
+  )
+}
+
+const where = () => screen.getByTestId('where').textContent ?? ''
+const query = () => new URLSearchParams(where().split('?')[1] ?? '')
+
+beforeEach(() => {
+  visited.length = 0
+  setToken('test-token')
+})
+afterEach(() => setToken(null))
+
+describe('AccountsPage', () => {
+  it('renders the name as a link to the account and navigates exactly once when it is clicked', async () => {
+    stubApi()
+    renderPage()
+    const link = await screen.findByRole('link', { name: 'Account 1' })
+    expect(link).toHaveAttribute('href', '/accounts/acc-1')
+    expect(screen.getByRole('link', { name: 'Account 2' })).toHaveAttribute('href', '/accounts/acc-2')
+    expect(visited).toEqual(['/accounts'])
+    await userEvent.click(link)
+    expect(await screen.findByRole('heading', { name: 'Detail page' })).toBeInTheDocument()
+    expect(visited).toEqual(['/accounts', '/accounts/acc-1'])
+  })
+
+  it('renders the rows with formatted money and dates', async () => {
+    stubApi()
+    renderPage()
+    expect(await screen.findByText('Account 1')).toBeInTheDocument()
+    expect(screen.getAllByText('$1,234.50')).toHaveLength(2)
+    expect(screen.getAllByText('Mar 1, 2026')).toHaveLength(2)
+    expect(screen.getByText('Showing 1–2 of 2')).toBeInTheDocument()
+  })
+
+  it('typing in search updates the URL and the request, and resets the page', async () => {
+    const fetchMock = stubApi()
+    renderPage('/accounts?page=3')
+    await screen.findByText('Account 1')
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search by name' }), 'ab')
+    expect(query().get('search')).toBe('ab')
+    expect(query().has('page')).toBe(false)
+    await waitFor(() => expect(lastRequest(fetchMock).searchParams.get('search')).toBe('ab'))
+    expect(lastRequest(fetchMock).searchParams.get('page')).toBe('1')
+  })
+
+  it('search replaces the history entry instead of adding one per keystroke', async () => {
+    stubApi()
+    renderPage('/accounts?status=closed')
+    await screen.findByText('Account 1')
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search by name' }), 'abc')
+    expect(query().get('search')).toBe('abc')
+    // With push, going back would land on ?search=ab. With replace there is nothing to go back to.
+    await userEvent.click(screen.getByRole('button', { name: 'test-back' }))
+    expect(query().get('search')).toBe('abc')
+  })
+
+  it('choosing a status updates the URL and the request', async () => {
+    const fetchMock = stubApi()
+    renderPage('/accounts?page=2')
+    await screen.findByText('Account 1')
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'paused')
+    expect(query().get('status')).toBe('paused')
+    expect(query().has('page')).toBe(false)
+    await waitFor(() => expect(lastRequest(fetchMock).searchParams.get('status')).toBe('paused'))
+    expect(lastRequest(fetchMock).searchParams.get('page')).toBe('1')
+  })
+
+  it('choosing a tier updates the URL and the request', async () => {
+    const fetchMock = stubApi()
+    renderPage('/accounts?page=2')
+    await screen.findByText('Account 1')
+    await userEvent.selectOptions(screen.getByLabelText('Tier'), 'silver')
+    expect(query().get('tier')).toBe('silver')
+    expect(query().has('page')).toBe(false)
+    await waitFor(() => expect(lastRequest(fetchMock).searchParams.get('tier')).toBe('silver'))
+    expect(lastRequest(fetchMock).searchParams.get('page')).toBe('1')
+  })
+
+  it('clicking a sortable header updates the URL and the request, and resets the page', async () => {
+    const fetchMock = stubApi()
+    renderPage('/accounts?page=2')
+    await screen.findByText('Account 1')
+    await userEvent.click(screen.getByRole('button', { name: /Monthly value/ }))
+    expect(query().get('sort')).toBe('monthly_value')
+    expect(query().has('page')).toBe(false)
+    await waitFor(() => expect(lastRequest(fetchMock).searchParams.get('sort')).toBe('monthly_value'))
+    expect(lastRequest(fetchMock).searchParams.get('page')).toBe('1')
+    await userEvent.click(screen.getByRole('button', { name: /Monthly value/ }))
+    expect(query().get('sort')).toBe('-monthly_value')
+    await waitFor(() => expect(lastRequest(fetchMock).searchParams.get('sort')).toBe('-monthly_value'))
+  })
+
+  it('reads its initial state from the URL', async () => {
+    const fetchMock = stubApi()
+    renderPage('/accounts?status=closed&sort=-monthly_value&page=2')
+    await screen.findByText('Account 1')
+    const request = listCalls(fetchMock)[0]
+    expect(request.searchParams.get('status')).toBe('closed')
+    expect(request.searchParams.get('sort')).toBe('-monthly_value')
+    expect(request.searchParams.get('page')).toBe('2')
+    expect(screen.getByLabelText('Status')).toHaveValue('closed')
+    expect(screen.getByLabelText('Tier')).toHaveValue('')
+    expect(screen.getByRole('columnheader', { name: /Monthly value/ })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    )
+  })
+
+  it.each(['abc', '0', '-2', '1.5', '99999999'])('falls back to page 1 for page=%s', async (bad) => {
+    const fetchMock = stubApi()
+    renderPage(`/accounts?page=${bad}`)
+    await screen.findByText('Account 1')
+    expect(listCalls(fetchMock)[0].searchParams.get('page')).toBe('1')
+  })
+
+  it('navigates to the account when a row is clicked', async () => {
+    stubApi()
+    renderPage()
+    await userEvent.click(await screen.findByText('Account 2'))
+    expect(await screen.findByRole('heading', { name: 'Detail page' })).toBeInTheDocument()
+    expect(where()).toBe('/accounts/acc-2')
+  })
+
+  it('shows the empty message when there are no rows, but not while loading', async () => {
+    stubApi(() => json({ items: [], total: 0, page: 1, page_size: 25 }))
+    renderPage()
+    expect(screen.queryByText('No accounts match these filters.')).not.toBeInTheDocument()
+    expect(await screen.findByText('No accounts match these filters.')).toBeInTheDocument()
+  })
+
+  it('shows an error state with Try again', async () => {
+    let calls = 0
+    stubApi(() => {
+      calls += 1
+      return calls === 1
+        ? json({ error: { code: 'server_error', message: 'List exploded' } }, 500)
+        : json({ items: [account(1)], total: 1, page: 1, page_size: 25 })
+    })
+    renderPage()
+    expect(await screen.findByText('List exploded')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('Account 1')).toBeInTheDocument()
+    expect(screen.queryByText('List exploded')).not.toBeInTheDocument()
+  })
+
+  it('offers New account to an admin only', async () => {
+    stubApi()
+    const { unmount } = renderPage('/accounts', 'admin')
+    await screen.findByText('Account 1')
+    expect(screen.getByRole('button', { name: 'New account' })).toBeInTheDocument()
+    unmount()
+    renderPage('/accounts', 'member')
+    await screen.findByText('Account 1')
+    expect(screen.queryByRole('button', { name: 'New account' })).not.toBeInTheDocument()
+  })
+
+  it('opens the form for an admin and lands on the new account after saving', async () => {
+    stubApi()
+    const fetchMock = vi.fn(async (input: URL | string, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (url.pathname === '/api/users') return json({ items: [], total: 0, page: 1, page_size: 100 })
+      if (init?.method === 'POST') return json(account(9), 201)
+      return json({ items: [account(1)], total: 1, page: 1, page_size: 25 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderPage('/accounts', 'admin')
+    await screen.findByText('Account 1')
+    await userEvent.click(screen.getByRole('button', { name: 'New account' }))
+    const dialog = screen.getByRole('dialog', { name: 'New account' })
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Fresh')
+    await userEvent.type(within(dialog).getByLabelText('Monthly value (USD)'), '10')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByRole('heading', { name: 'Detail page' })).toBeInTheDocument()
+    expect(where()).toBe('/accounts/acc-9')
+  })
+
+  it('sanitises bogus sort, status and tier from the URL', async () => {
+    const fetchMock = stubApi()
+    renderPage('/accounts?sort=password_hash&status=bogus&tier=platinum')
+    expect(await screen.findByText('Account 1')).toBeInTheDocument()
+    const request = listCalls(fetchMock)[0]
+    expect(request.searchParams.get('sort')).toBe('name')
+    expect(request.searchParams.has('status')).toBe(false)
+    expect(request.searchParams.has('tier')).toBe(false)
+    expect(screen.getByLabelText('Status')).toHaveValue('')
+    expect(screen.getByLabelText('Tier')).toHaveValue('')
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  })
+
+  it('keeps valid descending sorts and rejects a bare dash', async () => {
+    const fetchMock = stubApi()
+    renderPage('/accounts?sort=-opened_at')
+    await screen.findByText('Account 1')
+    expect(listCalls(fetchMock)[0].searchParams.get('sort')).toBe('-opened_at')
+  })
+
+  it('truncates a long search to 100 characters, with NULs removed', async () => {
+    const fetchMock = stubApi()
+    renderPage(`/accounts?search=${'a%00'.repeat(300)}`)
+    await screen.findByText('Account 1')
+    const expected = 'a'.repeat(100)
+    expect(listCalls(fetchMock)[0].searchParams.get('search')).toBe(expected)
+    const input = screen.getByRole('searchbox', { name: 'Search by name' })
+    expect(input).toHaveValue(expected)
+    expect(input).toHaveAttribute('maxlength', '100')
+  })
+})

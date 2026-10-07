@@ -6,9 +6,19 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+# A new push to a pull request cancels that pull request's superseded run. Pushes to main
+# get a group of their own (the run id), so they are never cancelled or superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -52,3 +62,22 @@ jobs:
         run: alembic upgrade head
       - name: Test
         run: pytest -v --cov=app --cov-fail-under=80
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test -- --run
+      - run: npm run build
